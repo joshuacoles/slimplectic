@@ -9,14 +9,14 @@ def GGLdefs(r: int, precision: int = 20):
     Gives the Collocation points, weights and derivative matrix for the Galerkin-Gauss-Lobatto Variational Integrator as
     floats evaluated to precision.
 
-    Arguments:
-        - r: int, the number of intermediate points.
-        - p: int (default 20), the precision of the resolved collocation points.
+    Args:
+        r (int): the number of intermediate points.
+        precision (int): (default 20), the precision of the resolved collocation points.
 
     Returns:
-        - GGLxs[r+2], The numerical x - collocation points array,
-        - GGLws[r+2], The numerical weights
-        - GGLDM[r+2, r+2], The derivative matrix (as a function of x)
+        collocation_points[r+2], The numerical x - collocation points array,
+        point_weights[r+2], The numerical weights
+        derivative_matrix[r+2, r+2], The derivative matrix (as a function of x)
 
     All evaluated for a system with r intermediate points, i.e. (r+2) total collocation points, up to arbitrary
     precision, which is the number of sig. figs. in decimal representation
@@ -32,20 +32,20 @@ def GGLdefs(r: int, precision: int = 20):
     # Find collocation points for the Gauss-Lobatto quadrature
     x = symbols('x')
 
-    GGLxs = list_nprec(polys.polytools.real_roots(
+    collocation_points = list_nprec(polys.polytools.real_roots(
         # Question: What is this function?
         (x ** 2 - 1) * diff(legendre(n, x), x),
         multiple=True
     ))
 
     # Determine the weight functions
-    GGLws = list_nprec(
-        [2 / (n * (n + 1) * (legendre(n, xj)) ** 2) for xj in GGLxs]
+    point_weights = list_nprec(
+        [2 / (n * (n + 1) * (legendre(n, xj)) ** 2) for xj in collocation_points]
     )
 
     # Determine the derivative matrix using the grid points evaluated to the right position
     # Generate a 2D array of zeros, we will fill it in the below
-    GGLDM = [[0 for _ in range(n + 1)] for _ in range(n + 1)]
+    derivative_matrix = [[0 for _ in range(n + 1)] for _ in range(n + 1)]
 
     # Fills the matrix
     # QUESTION: Where does this come from?
@@ -53,19 +53,20 @@ def GGLdefs(r: int, precision: int = 20):
         for j in range(n + 1):
             if i == j:
                 if j == 0:
-                    GGLDM[i][j] = nprec(-(1 / 4) * n * (n + 1))
+                    derivative_matrix[i][j] = nprec(-(1 / 4) * n * (n + 1))
                 elif j == n:
-                    GGLDM[i][j] = nprec((1 / 4) * n * (n + 1))
+                    derivative_matrix[i][j] = nprec((1 / 4) * n * (n + 1))
                 else:
-                    GGLDM[i][j] = S.Zero
+                    derivative_matrix[i][j] = S.Zero
             else:
-                GGLDM[i][j] = nprec(legendre(n, GGLxs[i]) / (legendre(n, GGLxs[j]) * (GGLxs[i] - GGLxs[j])))
+                derivative_matrix[i][j] = nprec(legendre(n, collocation_points[i]) / (legendre(n, collocation_points[j]) * (collocation_points[i] - collocation_points[j])))
 
-    return GGLxs, GGLws, GGLDM
+    return collocation_points, point_weights, derivative_matrix
 
 
 def q_Generate_pm(qlist):
-    """q_Generate_pm generates the plus and minus doubled variables of qlist
+    """
+    Generates lists of sympy symbols for the q_+ and q_- terms. These are used in the non-conservative componentsthe plus and minus doubled variables of qlist. These are
     Output:
     (qplist, qmlist)
     qplist[dof] - the list of symbols of the form q_+
