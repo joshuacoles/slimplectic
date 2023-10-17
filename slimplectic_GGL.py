@@ -4,49 +4,62 @@ import numpy
 import scipy.optimize
 
 
-def GGLdefs(r, precision=20):
-    """ Gives the Collocation points, weights and derivative matrix
-    for the Galerkin-Gauss-Lobatto Variational Integrator.
-    GGLdefs returns as a tuple:
-    GGLxs[r+2] - the numerical x - collocation points array,
-    GGLws[r+2] - the numerical weights
-    GGLDM[r+2, r+2] - the derivative matrix (as a function of x)
-    all evaluated for a system with r intermediate points,
-    i.e. (r+2) total collocation points, up to arbitrary precision,
-    which is the number of sig. figs. in decimal representation
+def GGLdefs(r: int, precision: int = 20):
+    """
+    Gives the Collocation points, weights and derivative matrix for the Galerkin-Gauss-Lobatto Variational Integrator as
+    floats evaluated to precision.
+
+    Arguments:
+        - r: int, the number of intermediate points.
+        - p: int (default 20), the precision of the resolved collocation points.
+
+    Returns:
+        - GGLxs[r+2], The numerical x - collocation points array,
+        - GGLws[r+2], The numerical weights
+        - GGLDM[r+2, r+2], The derivative matrix (as a function of x)
+
+    All evaluated for a system with r intermediate points, i.e. (r+2) total collocation points, up to arbitrary
+    precision, which is the number of sig. figs. in decimal representation
     """
 
-    # Convenience lambda to evaluate to given precision
+    # Convenience lambda to evaluate a sympy expression to given precision
     nprec = lambda x: N(x, precision)
+    list_nprec = lambda l: list(map(nprec, l))
 
-    # Set polynomial order n for a given r intermediate points
-    # or r+2 total collocation points
+    # Set polynomial order n for a given r intermediate points or r + 2 total collocation points
     n = r + 1
 
-    # find collocation points for the Gauss-Lobatto quadrature
+    # Find collocation points for the Gauss-Lobatto quadrature
     x = symbols('x')
-    GGLxs = list(map(nprec,
-                     polys.polytools.real_roots(
-                         (x ** 2 - 1) * diff(legendre(n, x), x),
-                         n + 1)))
+
+    GGLxs = list_nprec(polys.polytools.real_roots(
+        # Question: What is this function?
+        (x ** 2 - 1) * diff(legendre(n, x), x),
+        multiple=True
+    ))
 
     # Determine the weight functions
-    GGLws = list(map(nprec, [2 / (n * (n + 1) * (legendre(n, xj)) ** 2) for xj in GGLxs]))
+    GGLws = list_nprec(
+        [2 / (n * (n + 1) * (legendre(n, xj)) ** 2) for xj in GGLxs]
+    )
 
-    # Determine the derivative matrix using the grid points evaluated
-    # to the right position
-    GGLDM = [[0 for xx in range(n + 1)] for xx in range(n + 1)]
+    # Determine the derivative matrix using the grid points evaluated to the right position
+    # Generate a 2D array of zeros, we will fill it in the below
+    GGLDM = [[0 for _ in range(n + 1)] for _ in range(n + 1)]
+
+    # Fills the matrix
+    # QUESTION: Where does this come from?
     for i in range(n + 1):
         for j in range(n + 1):
-            if (i == j and j == 0):
-                GGLDM[i][j] = nprec(-(1 / 4) * n * (n + 1))
-            if (i == j and j == n):
-                GGLDM[i][j] = nprec((1 / 4) * n * (n + 1))
-            if (i == j and (0 < j) and (j < n)):
-                GGLDM[i][j] = S.Zero
-            if (i != j):
+            if i == j:
+                if j == 0:
+                    GGLDM[i][j] = nprec(-(1 / 4) * n * (n + 1))
+                elif j == n:
+                    GGLDM[i][j] = nprec((1 / 4) * n * (n + 1))
+                else:
+                    GGLDM[i][j] = S.Zero
+            else:
                 GGLDM[i][j] = nprec(legendre(n, GGLxs[i]) / (legendre(n, GGLxs[j]) * (GGLxs[i] - GGLxs[j])))
-                # print GGLDM[i][j]
 
     return GGLxs, GGLws, GGLDM
 
