@@ -22,10 +22,12 @@ Coming soon... for now, why not try following along with one of the
 ## Dependencies
 
 `slimplectic` relies on fairly standard packages:
+
 * [`numpy`](http://www.numpy.org/)
 * [`scipy`](http://scipy.org/)
 * [`sympy`](http://www.sympy.org/)
 
 The example notebooks also require
+
 * [`ipython`](http://ipython.org/)
 * [`matplotlib`](http://matplotlib.org/)
