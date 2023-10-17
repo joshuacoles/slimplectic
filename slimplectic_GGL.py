@@ -65,7 +65,7 @@ def GGLdefs(r: int, precision: int = 20):
     return collocation_points, point_weights, derivative_matrix
 
 
-def q_Generate_pm(qlist):
+def q_Generate_pm(qlist: list):
     """
     Generates lists of sympy symbols for the q_+ and q_- terms. These are used in the non-conservative lagrangian.
 
@@ -82,7 +82,7 @@ def q_Generate_pm(qlist):
     return qplist, qmlist
 
 
-def Gen_pi_list(qlist):
+def Gen_pi_list(qlist: list):
     """
     Generate_pi generates the symbol list for the non-conservative discrete momenta pi
 
@@ -99,7 +99,7 @@ def Gen_pi_list(qlist):
     return pi_n_list, pi_np1_list
 
 
-def Physical_Limit(q_list, q_p_list, q_m_list, expression):
+def Physical_Limit(q_list: list, q_p_list: list, q_m_list: list, expression):
     """
     Generates a Sympy object derived from expression, under the Physical Limit. This involves taking,
 
