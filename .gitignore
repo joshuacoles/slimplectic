@@ -1,3 +1,7 @@
 *.pyc
 .ipynb_checkpoints
 .idea
+
+# We use a test case script to determine if the code is still working as intended
+test-case-outputs/*.csv
+!test-case-outputs/golden-master.csv
