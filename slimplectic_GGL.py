@@ -14,9 +14,9 @@ def GGLdefs(r: int, precision: int = 20):
         precision (int): (default 20), the precision of the resolved collocation points.
 
     Returns:
-        collocation_points[r+2], The numerical x - collocation points array,
-        point_weights[r+2], The numerical weights
-        derivative_matrix[r+2, r+2], The derivative matrix (as a function of x)
+        - collocation_points[r+2], The numerical x - collocation points array,
+        - point_weights[r+2], The numerical weights
+        - derivative_matrix[r+2, r+2], The derivative matrix (as a function of x)
 
     All evaluated for a system with r intermediate points, i.e. (r+2) total collocation points, up to arbitrary
     precision, which is the number of sig. figs. in decimal representation
@@ -47,8 +47,8 @@ def GGLdefs(r: int, precision: int = 20):
     # Generate a 2D array of zeros, we will fill it in the below
     derivative_matrix = [[0 for _ in range(n + 1)] for _ in range(n + 1)]
 
-    # Fills the matrix
-    # QUESTION: Where does this come from?
+    # Fills the derivative matrix. This formula is given by
+    # \cite[Eq 5, p. 2]{tsangSLIMPLECTICINTEGRATORSVARIATIONAL2015}
     for i in range(n + 1):
         for j in range(n + 1):
             if i == j:
@@ -59,33 +59,33 @@ def GGLdefs(r: int, precision: int = 20):
                 else:
                     derivative_matrix[i][j] = S.Zero
             else:
-                derivative_matrix[i][j] = nprec(legendre(n, collocation_points[i]) / (legendre(n, collocation_points[j]) * (collocation_points[i] - collocation_points[j])))
+                derivative_matrix[i][j] = nprec(legendre(n, collocation_points[i]) / (
+                        legendre(n, collocation_points[j]) * (collocation_points[i] - collocation_points[j])))
 
     return collocation_points, point_weights, derivative_matrix
 
 
 def q_Generate_pm(qlist):
     """
-    Generates lists of sympy symbols for the q_+ and q_- terms. These are used in the non-conservative componentsthe plus and minus doubled variables of qlist. These are
-    Output:
-    (qplist, qmlist)
-    qplist[dof] - the list of symbols of the form q_+
-    qmlist[dof] - the list of symbols of the form q_-
+    Generates lists of sympy symbols for the q_+ and q_- terms. These are used in the non-conservative lagrangian.
 
-    Input:
-    qlist[dof] - the 1-d list of symbols that you want to double
+    Args:
+        qlist: The list of degrees of freedom
+
+    Returns:
+        1. qplist: The list of symbols of the form q_+
+        2. qmlist: The list of symbols of the form q_-
     """
-    qplist = []
-    qmlist = []
-    for i in range(len(qlist)):
-        qplist.append(Symbol(repr(qlist[i]) + '_+', real=True))
-        qmlist.append(Symbol(repr(qlist[i]) + '_-', real=True))
+
+    qplist = [Symbol(repr(q) + '_+') for q in qlist]
+    qmlist = [Symbol(repr(q) + '_-') for q in qlist]
     return qplist, qmlist
 
 
 def Gen_pi_list(qlist):
-    """Generate_pi generates the symbol list for the nonconservative
-    discrete momenta pi
+    """
+    Generate_pi generates the symbol list for the non-conservative discrete momenta pi
+
     Output: (pi_n_list, pi_np1_list)
     pi_n_list[dof] - list of symbols for the current pi_n
     pi_np1_list[dof] - list of symbols for the next pi_n+1
@@ -93,42 +93,49 @@ def Gen_pi_list(qlist):
     qlist[dof] - the 1-d list of symbols that you want make
                  momenta for
     """
-    pi_n_list = []
-    pi_np1_list = []
-    for i in range(len(qlist)):
-        pi_n_list.append(Symbol("\pi_" + repr(qlist[i]) + "^{[n]}", real=True))
-        pi_np1_list.append(Symbol("\pi_" + repr(qlist[i]) + "^{[n+1]}", real=True))
+
+    pi_n_list = [Symbol("\pi_" + repr(q) + "^{[n]}", real=True) for q in qlist]
+    pi_np1_list = [Symbol("\pi_" + repr(q) + "^{[n+1]}", real=True) for q in qlist]
     return pi_n_list, pi_np1_list
 
 
 def Physical_Limit(q_list, q_p_list, q_m_list, expression):
-    """ Physical_Limit takes the physical limit of a function of
-    the doubled +/- variables that is taking q_- -> 0 and q_+ -> q
-    The q_lists are expected to be 1-d lists.
-    If you are passing in q_tables please flatten them using
-    something like:
-    q_list = [qval for qvallist in qtable for qval in qvallist]
+    """
+    Generates a Sympy object derived from expression, under the Physical Limit. This involves taking,
 
-    Physical_Limit outputs PL_Expr an sympy object equivalent to
-    expression with the physical limit taken.
+    - q_- -> 0
+    - q_+ -> q
 
-    Inputs:
-    q_list[dof] - list of sympy objects that correspond to the dof
-    q_p_list[dof] - list of sympy objects that correspond to the + dof
-    q_m_list[dof] - list of sympy objects that corerspond to the - dof
+    This is implemented through a call to Sympy `subs`.
 
-    Physical_Limit assumes that the q_lists share the same ordering.
+    Note: We assume that the q_list, q_p_list, and q_m_list share the same ordering.
+
+    If you are passing in q_tables please flatten them using something like:
+
+        q_list = [qval for qvallist in qtable for qval in qvallist]
+
+    Args:
+        q_list: The original degrees of freedom of the system.
+        q_p_list: The q_+ degrees of freedom.
+        q_m_list: The q_0 degrees of freedom.
+        expression: The expression to take into the Physical Limit.
+
+    Returns:
+        Expression substituted to be under the physical limit.
     """
 
     dof_count = len(q_list)
 
     sub_list = []
     for dof in range(dof_count):
+        # q_+ -> q
         sub_list.append((q_p_list[dof], q_list[dof]))
+
+        # q_- -> 0
         sub_list.append((q_m_list[dof], 0))
 
-    PL_Expr = expression.subs(sub_list)
-    return PL_Expr
+    # The expression substituted to be under the physical limit.
+    return expression.subs(sub_list)
 
 
 def GGL_q_Collocation_Table(qlist, cp_count):
