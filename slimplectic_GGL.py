@@ -3,6 +3,8 @@ import sympy
 from sympy import *
 import numpy
 import scipy.optimize
+from nptyping import NDArray, Float, Shape
+from typing import Any, Callable
 
 
 def flatten_table(table: list[list]) -> list:
@@ -430,31 +432,37 @@ def compute_jacobian(expr_vec, var_vec):
     return J
 
 
-def pi_ic_from_qdot(qdot_vec, q_vec,
-                    tval, ddt,
-                    pi_guess_vec,
-                    qi_sol_func, qdot_n_func):
+# TODO: currently unused, what does this do?
+def pi_ic_from_qdot(
+        qdot_vec: NDArray[Any, Float],
+        q_vec: NDArray[Any, Float],
+        tval: float,
+        ddt: float,
+        pi_guess_vec: NDArray[Any, Float],
+        qi_sol_func: Callable[[NDArray[Any, Float], NDArray[Any, Float], float, float], NDArray[Any, Float]],
+        qdot_n_func: Callable[
+            [NDArray[Any, Float], NDArray[Any, Float], NDArray[Any, Float], float, float],
+            NDArray[Any, Float]
+        ]
+) -> NDArray[Any, Float]:
     """
     This finds the initial condition for the pi vector for a given qdot_vec and q_vec initial condition, since pi
     depends on the choice of discretization.
 
     Args:
-        qdot_vec[dof] - ndarray of initial qdot to be matched
-        q_vec[dof] - ndarray of initial q
-        tval - float for the initial time
-        ddt - float for the time step size
-        pi_guess_vec[dof] - initial guess for pi
-        qi_sol_func - 1st function returned by Gen_GGL_NC_VI_Map
-                      that generates an ndarray for the qi_sol
-        qdot_n_func - 4th function returned by Gen_GGL_NC_VI_Map
-                      that calculates the value of qdot for a
-                      given pi_n
+        qdot_vec: Initial qdot to be matched, shape (dof,).
+        q_vec: Initial q, shape (dof,).
+        tval: Initial time
+        ddt: Time step size
+        pi_guess_vec: Initial guess for pi, shape (dof,).
+        qi_sol_func: 1st function returned by Gen_GGL_NC_VI_Map that generates an ndarray for the qi_sol
+        qdot_n_func: 4th function returned by Gen_GGL_NC_VI_Map that calculates the value of qdot for a given pi_n.
 
     Returns:
         pi_init_sol, an ndarray for the solution of that matches the initial condition in terms of q and qdot given.
     """
 
-    def fun(pi_vec):
+    def fun(pi_vec: NDArray[Any, Float]):
         qi_sol = qi_sol_func(q_vec, pi_vec, tval, ddt)
         qdot_guess = qdot_n_func(qi_sol, q_vec, pi_vec, tval, ddt)
         return qdot_vec - qdot_guess
@@ -462,33 +470,35 @@ def pi_ic_from_qdot(qdot_vec, q_vec,
     return scipy.optimize.root(fun, pi_guess_vec)
 
 
-def pi_ic_from_qnext(q_next_vec, q_vec,
-                     tval, ddt,
-                     pi_guess_vec,
-                     qi_sol_func, q_np1_func):
-    """This finds the initial condition for the pi vector
-    for a given qdot_vec and q_vec initial condition,
-    since pi depends on the choice of discretization.
-
-    Outputs:
-    pi_init_sol - ndarray for the solution of that matches
-                  the initial condition in terms of q and
-                  qdot given
+# TODO: currently unused, what does this do?
+def pi_ic_from_qnext(
+        q_next_vec: NDArray[Any, Float],
+        q_vec: NDArray[Any, Float],
+        tval: float,
+        ddt: float,
+        pi_guess_vec: NDArray[Any, Float],
+        qi_sol_func: Callable[[NDArray[Any, Float], NDArray[Any, Float], float, float], NDArray[Any, Float]],
+        q_np1_func: Callable[
+            [NDArray[Any, Float], NDArray[Any, Float], NDArray[Any, Float], float, float], NDArray[Any, Float]]
+) -> NDArray[Any, Float]:
+    """
+    This finds the initial condition for the pi vector for a given qdot_vec and q_vec initial condition, since pi
+    depends on the choice of discretization. Unless stated otherwise all vectors are assumed to be of shape (dof,).
 
     Inputs:
-    qdot_vec[dof] - ndarray of initial qdot to be matched
-    q_vec[dof] - ndarray of initial q
-    tval - float for the initial time
-    ddt - float for the time step size
-    pi_guess_vec[dof] - initial guess for pi
-    qi_sol_func - 1st function returned by Gen_GGL_NC_VI_Map
-                  that generates an ndarray for the qi_sol
-    qdot_n_func - 4th function returned by Gen_GGL_NC_VI_Map
-                  that calculates the value of qdot for a
-                  given pi_n
+        qdot_vec: Initial qdot to be matched vector
+        q_vec: Initial q vector
+        tval: Initial time
+        ddt: Time step size
+        pi_guess_vec: Initial guess for pi vector
+        qi_sol_func: 1st function returned by Gen_GGL_NC_VI_Map that generates an ndarray for the qi_sol
+        qdot_n_func: 4th function returned by Gen_GGL_NC_VI_Map that calculates the value of qdot for a given pi_n
+
+    Returns:
+        pi_init_sol, ndarray for the solution of that matches the initial condition in terms of q and qdot given.
     """
 
-    def fun(pi_vec):
+    def fun(pi_vec: NDArray[Any, Float]):
         qi_sol = qi_sol_func(q_vec, pi_vec, tval, ddt)
         q_next_guess = q_np1_func(qi_sol, q_vec, pi_vec, tval, ddt)
         return q_next_vec - q_next_guess
@@ -496,19 +506,20 @@ def pi_ic_from_qnext(q_next_vec, q_vec,
     return scipy.optimize.root(fun, pi_guess_vec)
 
 
-def Gen_GGL_NC_VI_Map(t_symbol,
-                      q_list, q_p_list, q_m_list,
-                      v_list, v_p_list, v_m_list,
-                      Lexpr,
-                      Kexpr,
-                      r,
-                      sym_paramlist=[],
-                      sym_precision=20,
-                      eval_modules="numpy",
-                      method='implicit',
-                      verbose=True,
-                      verbose_rational=True
-                      ):
+def Gen_GGL_NC_VI_Map(
+        t_symbol,
+        q_list, q_p_list, q_m_list,
+        v_list, v_p_list, v_m_list,
+        Lexpr,
+        Kexpr,
+        r,
+        sym_paramlist=[],
+        sym_precision=20,
+        eval_modules="numpy",
+        method='implicit',
+        verbose=True,
+        verbose_rational=True
+):
     """Gen_GGL_NC_VI_Map generates the mapping functions for the
     Galerkin-Gauss-Lobatto Nonconservative Variational Integrator
     described in Tsang, Galley, Stein & Turner (2015), for a generic
