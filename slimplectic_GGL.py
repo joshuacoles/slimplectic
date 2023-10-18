@@ -201,9 +201,10 @@ def GGL_Gen_Ld(
         tsymbol: the symbol used for the explicit time dependence of the Lagrangian
         q_list: list of sympy variables (not including time derivatives),
         qprime_list: list of sympy variables for the time derivatives, in corresponding order to q_list.
-        L: the algebraic expression for the full Lagrangian in terms of q_list and qprime_list variables. L(t, q, dotq)
-        ddt: TODO
-        r: TODO
+        L: the algebraic expression for the continuous conservative Lagrangian in terms of q_list and qprime_list
+           variables L(t, q, dotq).
+        ddt: symbol for the time step.
+        r: number of intermediate quadrature steps.
         paramlist: the constant parameter substitution list for evaluations
         precision: precision for which evaluations occur. This should be higher than machine precision for for best
                    results.
@@ -237,6 +238,7 @@ def GGL_Gen_Ld(
 
     # Evaluate Ld which is the weighted sum over each point, using the global paramlist substitutions as well as local
     # substitutions for each quadrature location according to the q_Table, dphidt_Table, and t_list generated above.
+    # TODO: This will become evaluation of functions and normal sums in JAX
     Ld = 0
     for i in range(r + 2):
         local_substitutions = []
@@ -262,82 +264,75 @@ def GGL_Gen_Kd(
         paramlist: list[tuple[sympy.Expr, sympy.Expr]] = [],
         precision=20
 ):
-    """GGL_Gen_Kd generates the discrete nonconservative potential
-    for use in determining the GGL variational integrator.
-
-    Outputs:
-    (Kd, q_p_Table, q_m_Table)
-    Kd - the algebraic expression for the discrete nonconservative
-         potential
-    q_{p/m}_Table[len(q_list)][r+2][2] -
-        the array of sympy symbols representing the
-        q's at each quadrature point for +/-.
-
-    Inputs are:
-    tsymbol - the symbol used for the explicit time dependence
-              of the Lagrangian
-    q_p_list[dof] - list of sympy variables for the q_+
-                    doubled dof,
-    q_m_list[dof] - list of sympy variables for the
-                    q_- doubled dof,
-    qprime_p_list[dof] - list of sympy variables qdot_+
-                         doubled dof derivatives,
-    qprime_m_list[dof] - list of sympy variables qdot_-
-                         doubled dof derivatives,
-    K - algebraic expression for the continuous Lagrangian,
-        in terms of q_p_list, q_m_list qprime_p_list
-        and qprime_m_list variables
-    ddt - symbol for the time step
-    r - number of intermediate quadrature steps,
-    paramlist - the constant parameter substitution
-                list for evaluations
-    precision - precision for which evaluations occur
-                (should be higher than machine precision
-                for for best results)
     """
-    # Initialize GGLdefs for collocation points, weights and derivative matrix
-    xs, ws, DM = generate_collocation_points(r, precision)
+    Generates the discrete non-conserative Lagrangian $K$ for use in determining the GGL variational integrator.
+
+    Args:
+        tsymbol: the symbol used for the explicit time dependence of the Lagrangian
+        q_p_list: list of sympy variables (not including time derivatives) for the q_+ doubled dof
+        q_m_list: list of sympy variables (not including time derivatives) for the q_- doubled dof, in corresponding
+                  order.
+        qprime_p_list: list of sympy variables for the q_+ doubled dof time derivatives, in corresponding order.
+        qprime_m_list: list of sympy variables for the q_- doubled dof time derivatives, in corresponding order.
+        K: the algebraic expression for the continuous non-conservative Lagrangian in terms of q_list and qprime_list
+           variables. L(t, q, dotq).
+        ddt: symbol for the time step.
+        r: number of intermediate quadrature steps.
+        paramlist: the constant parameter substitution list for evaluations
+        precision: precision for which evaluations occur. This should be higher than machine precision for for best
+                   results.
+
+    Returns:
+        (Kd, q_p_Table, q_m_Table), where Kd is the algebraic expression for the discrete non-conservative Lagrangian,
+        and q_p_Table and q_m_table is a 2D array of shape (len(q_list), r + 2) containing the sympy symbols for q_{p,m}
+        at each quadrature point.
+    """
+
+    # First compute collocation points, weights and derivative matrix for the quadrature.
+    collocation_points, collocation_point_weights, derivative_matrix = generate_collocation_points(r, precision)
+
+    # Next generate substitution tables for evaluating the Lagrangian at each collocation points.
 
     # Create q_{p/m}_Table for all the algebraic variables based on q_list
     # q_{p/m}_Table[len(qlist)][r+2]
     # [[..],..,[qx_i0,...,qx_i(r+2)],..,[..]]
-
     q_p_Table = GGL_q_Collocation_Table(q_p_list, r + 2)
-
     q_m_Table = GGL_q_Collocation_Table(q_m_list, r + 2)
 
     # Create dphidt_{p/m}_Table for the algebraic form of dPhi/dt where
     # Phi is the polynomial interpolation of q over the quadrature points
     # dphidt_{p/m}_Table[len(qlist)][r+2]
     # Make sure to multiply by dx/dt = 2/ddt
+    dphidt_p_Table = [
+        [DM_Sum(DMvec, qs) * 2 / ddt for DMvec in derivative_matrix]
+        for qs in q_p_Table
+    ]
 
-    dphidt_p_Table = []
-    for qs in q_p_Table:
-        dphidt_p_Table.append([DM_Sum(DMvec, qs) * 2 / ddt for DMvec in DM])
+    dphidt_m_Table = [
+        [DM_Sum(DMvec, qs) * 2 / ddt for DMvec in derivative_matrix]
+        for qs in q_m_Table
+    ]
 
-        dphidt_m_Table = []
-    for qs in q_m_Table:
-        dphidt_m_Table.append([DM_Sum(DMvec, qs) * 2 / ddt for DMvec in DM])
+    # Evaluate Kd which is the weighted sum over each point, using the global paramlist substitutions as well as local
+    # substitutions for each quadrature location according to the q_p_Table, q_m_Table, dphidt_p_Table, dphidt_m_Table.
+    # NOTE: That we do not allow explict t dependence in the non-conservative Lagrangian.
+    # TODO: This will become evalution of functions and normal sums in JAX
 
     # Create list of substitution pairs used at each quadrature location
-    # sublist[r+2][4*len(qlist)]
-
-    sublist = []
-    for i in range(r + 2):
-        pairs = []
-        for j in range(len(q_p_list)):
-            pairs.append((q_p_list[j], q_p_Table[j][i]))
-            pairs.append((qprime_p_list[j], dphidt_p_Table[j][i]))
-        for j in range(len(q_m_list)):
-            pairs.append((q_m_list[j], q_m_Table[j][i]))
-            pairs.append((qprime_m_list[j], dphidt_m_Table[j][i]))
-        sublist.append(pairs)
-
     # Evaluate Ld which is the weighted sum over each point
     Kd = 0
     for i in range(r + 2):
-        Kd += 0.5 * ddt * ws[i] * (K.subs(sublist[i])).subs(paramlist)
-        # print ws[i]
+        local_substitutions = []
+        for j in range(len(q_p_list)):
+            local_substitutions.append((q_p_list[j], q_p_Table[j][i]))
+            local_substitutions.append((qprime_p_list[j], dphidt_p_Table[j][i]))
+
+        for j in range(len(q_m_list)):
+            local_substitutions.append((q_m_list[j], q_m_Table[j][i]))
+            local_substitutions.append((qprime_m_list[j], dphidt_m_Table[j][i]))
+
+        Kd += 0.5 * ddt * collocation_point_weights[i] * (K.subs(local_substitutions)).subs(paramlist)
+
     return Kd, q_p_Table, q_m_Table
 
 
