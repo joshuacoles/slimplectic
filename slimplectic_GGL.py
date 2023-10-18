@@ -1,4 +1,5 @@
 from __future__ import division, print_function
+import sympy
 from sympy import *
 import numpy
 import scipy.optimize
@@ -183,72 +184,84 @@ def DM_Sum(DMvec: list, qlist: list):
     return sum
 
 
-def GGL_Gen_Ld(tsymbol, q_list, qprime_list, L, ddt, r, paramlist=[], precision=20):
+def GGL_Gen_Ld(
+        tsymbol: sympy.Symbol,
+        q_list: list,
+        qprime_list: list,
+        L: sympy.Expr,
+        ddt,
+        r: int,
+        paramlist: list[tuple[sympy.Expr, sympy.Expr]] = [],
+        precision: int = 20
+):
     """
-    GGL_Gen_Ld generates the discrete Lagrangian for use in determining the GGL variational integrator.
+    Generates the discrete Lagrangian for use in determining the GGL variational integrator.
 
-    Outputs:
-    (Ld, q_Table)
-    Ld -  the algebraic expression for the discrete Lagrangian,
-    q_Table[len(q_list)][r+2] -  the array of sympy symbols for
-                                 qs at each quadrature point.
+    Args:
+        tsymbol: the symbol used for the explicit time dependence of the Lagrangian
+        q_list: list of sympy variables (not including time derivatives),
+        qprime_list: list of sympy variables for the time derivatives, in corresponding order to q_list.
+        L: the algebraic expression for the full Lagrangian in terms of q_list and qprime_list variables. L(t, q, dotq)
+        ddt: TODO
+        r: TODO
+        paramlist: the constant parameter substitution list for evaluations
+        precision: precision for which evaluations occur. This should be higher than machine precision for for best
+                   results.
 
-    Inputs are:
-    tsymbol - the symbol used for the explicit time dependence of the Lagrangian
-    q_list[dof] - list of sympy variables (not including time derivatives),
-    qprime_list[dof] - list of sympy variables for the time derivatives
-                       in the same order
-    L(t, q, dotq) - algebraic expression for the full Lagrangian,
-                    in terms of q_list and qprime_list variables
-    t - sympy variable for time, if used in the Lagrangian
-    r - number of intermediate quadrature steps,
-    paramlist - the constant parameter substitution list for evaluations
-    precision - precision for which evaluations occur
-                (should be higher than machine precision
-                 for for best results)
+    Returns:
+        (Ld, q_Table), where Ld is the algebraic expression for the discrete Lagrangian, and q_Table is a 2D array of
+        shape (len(q_list), r + 2) containing the sympy symbols for qs at each quadrature point.
     """
-    # Initialize GGLdefs for collocation points, weights and derivative matrix
-    xs, ws, DM = generate_collocation_points(r, precision)
 
-    # Create q_Table for all the algebraic variables based on q_list
-    # q_Table[len(q_list)][r+2]
+    # First compute collocation points, weights and derivative matrix for the quadrature.
+    collocation_points, collocation_point_weights, derivative_matrix = generate_collocation_points(r, precision)
+
+    # Next generate substitution tables for evaluating the Lagrangian at each collocation points.
+
+    # Create q_Table for all the algebraic variables based on q_list. Will be of shape (len(q_list), r+2) having rows:
     # [[..],..,[qx_i0,...,qx_i(r+2)],..,[..]]
-
     q_Table = GGL_q_Collocation_Table(q_list, r + 2)
 
     # Create list of times for evaluating L
-    t_list = [tsymbol + 0.5 * (1 + xi) * ddt for xi in xs]
+    t_list = [tsymbol + 0.5 * (1 + collocation_point) * ddt for collocation_point in collocation_points]
 
     # Create dphidt_Table for the algebraic form of dPhi/dt
     # where Phi is the polynomial
     # interpolation of q over the quadrature points
     # dphidt_Table[len(q_list)][r+2]
-    # Make sure to multiply by dx/dt = 2/ddt
+    # Make sure to multiply by dx/dt = 2/ddt TODO: Why
+    dphidt_Table = [
+        [DM_Sum(DMvec, qs) * 2 / ddt for DMvec in derivative_matrix]
+        for qs in q_Table
+    ]
 
-    dphidt_Table = []
-    for qs in q_Table:
-        dphidt_Table.append([DM_Sum(DMvec, qs) * 2 / ddt for DMvec in DM])
-
-    # Create list of substitution pairs used at each quadrature location
-    # sublist[r+2][2*len(q_list)]
-
-    sublist = []
-    for i in range(r + 2):
-        pairs = []
-        for j in range(len(q_list)):
-            pairs.append((q_list[j], q_Table[j][i]))
-            pairs.append((qprime_list[j], dphidt_Table[j][i]))
-            pairs.append((tsymbol, t_list[i]))
-        sublist.append(pairs)
-
-    # Evaluate Ld which is the weighted sum over each point
+    # Evaluate Ld which is the weighted sum over each point, using the global paramlist substitutions as well as local
+    # substitutions for each quadrature location according to the q_Table, dphidt_Table, and t_list generated above.
     Ld = 0
     for i in range(r + 2):
-        Ld += 0.5 * ddt * ws[i] * (L.subs(sublist[i])).subs(paramlist)
+        local_substitutions = []
+        for j in range(len(q_list)):
+            local_substitutions.append((q_list[j], q_Table[j][i]))
+            local_substitutions.append((qprime_list[j], dphidt_Table[j][i]))
+            local_substitutions.append((tsymbol, t_list[i]))
+
+        Ld += 0.5 * ddt * collocation_point_weights[i] * L.subs(local_substitutions).subs(paramlist)
+
     return Ld, q_Table
 
 
-def GGL_Gen_Kd(tsymbol, q_p_list, q_m_list, qprime_p_list, qprime_m_list, K, ddt, r, paramlist=[], precision=20):
+def GGL_Gen_Kd(
+        tsymbol: sympy.Symbol,
+        q_p_list: list,
+        q_m_list: list,
+        qprime_p_list: list,
+        qprime_m_list: list,
+        K: sympy.Expr,
+        ddt,
+        r: int,
+        paramlist: list[tuple[sympy.Expr, sympy.Expr]] = [],
+        precision=20
+):
     """GGL_Gen_Kd generates the discrete nonconservative potential
     for use in determining the GGL variational integrator.
 
