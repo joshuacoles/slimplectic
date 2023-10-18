@@ -5,6 +5,10 @@ import numpy
 import scipy.optimize
 
 
+def flatten_table(table: list[list]) -> list:
+    return [v for vec in table for v in vec]
+
+
 def generate_collocation_points(r: int, precision: int = 20) -> tuple[list[float], list[float], list[list[float]]]:
     """
     Gives the Collocation points, weights and derivative matrix for the Galerkin-Gauss-Lobatto Variational Integrator as
@@ -336,89 +340,92 @@ def GGL_Gen_Kd(
     return Kd, q_p_Table, q_m_Table
 
 
-def Gen_iter_EOM_List(q_Table, q_p_Table, q_m_Table, pi_n_list, pi_np1_list, Ld, Kd, ddt):
+def Gen_iter_EOM_List(q_Table: list[list], q_p_Table: list[list], q_m_Table: list[list], pi_n_list: list,
+                      pi_np1_list: list, Ld: sympy.Expr, Kd: sympy.Expr, ddt: sympy.Symbol):
     """
-    Gen_iter_EOM_Tables generate the symbolic Equation of Motion Tables
-    to be used for iteration
-
-    Output:
-    EOM_List[dof*(r+1)] - List of sympy equations of motion
-    Here the equations of motion are assumed to be:
-    (for i in [1..r])
-          [ddt*Ld_Table[0][i] + Kd_Table[0][i],
-           pi_1^[n] + ddt*(Ld_Table[0][0] + Kd_Table[0][0]),
-           ...
-           ddt*Ld_Table[dof][i] + Kd_Table[dof][i],
-           pi_1^[n] + ddt*(Ld_Table[dof][0] + Kd_Table[dof][0])]
-
-    The equation for pi_n+1 will be computed separately as it does
-    not need to be iterated.
+    Generate the symbolic Equation of Motion Tables to be used for iteration.
 
     Inputs:
-    q_table[dof][r+2] - Table of sympy variables for dofs
-    q_p_table[dof][r+2] - Table of sympy variables for + dofs
-    q_m_table[dof][r+2] - Table of sympy variables for - dofs
-    pi_n_list[dof] - List of sympy variables for the n.c.
-                     discrete momemta at current time
-    pi_np1_list[dof] - List of sympy variables for the n.c.
-                       discrete momemta at the next step
-    Ld - Sympy expression for Ld
-    Kd - Sympy expression for Kd
-    ddt - Sympy symbol for the time step
+        q_Table: Table of sympy variables for dofs, shape (dof, r + 2).
+        q_p_table: Table of sympy variables for + dofs, shape (dof, r + 2).
+        q_m_Table: Table of sympy variables for - dofs, shape (dof, r + 2).
+
+        pi_n_list: List of sympy variables for the non-conservative discrete momemta at current time, shape (dof,).
+        pi_np1_list: List of sympy variables for the non-conservative discrete momemta at the next step, shape (dof,).
+
+        Ld: Sympy expression for Ld
+        Kd: Sympy expression for Kd
+        ddt: Sympy symbol for the time step
+
+    Returns:
+        EOM_List[dof*(r+1)] - List of sympy equations of motion
+        Here the equations of motion are assumed to be:
+
+        (for i in [1..r])
+              [ddt*Ld_Table[0][i] + Kd_Table[0][i],
+               pi_1^[n] + ddt*(Ld_Table[0][0] + Kd_Table[0][0]),
+               ...
+               ddt*Ld_Table[dof][i] + Kd_Table[dof][i],
+               pi_1^[n] + ddt*(Ld_Table[dof][0] + Kd_Table[dof][0])]
+
+        The equation for pi_n+1 will be computed separately as it does
+        not need to be iterated.
     """
 
     # Define symbol long lists for use with the Physical Limit function
-    q_longlist = [q for qvec in q_Table for q in qvec]
-    q_p_longlist = [q for qvec in q_p_Table for q in qvec]
-    q_m_longlist = [q for qvec in q_m_Table for q in qvec]
+    q_longlist = flatten_table(q_Table)
+    q_p_longlist = flatten_table(q_p_Table)
+    q_m_longlist = flatten_table(q_m_Table)
 
     # Create the Ld and Kd parts of the EOM
     # By taking the derivative wrt the appropriate dof and
     # taking the physical limit for Kd
+    # TODO: JAX, DIFF operation
 
-    Ld_EOM_Table = [[diff(Ld, q)
-                     for q in qvec]
-                    for qvec in q_Table]
-    Kd_EOM_Table = [[Physical_Limit(q_longlist,
-                                    q_p_longlist,
-                                    q_m_longlist,
-                                    diff(Kd, q_m))
-                     for q_m in qvec]
-                    for qvec in q_m_Table]
+    Ld_EOM_Table = [
+        [diff(Ld, q) for q in qvec]
+        for qvec in q_Table
+    ]
+
+    # We differentiate Kd wrt q_- and evaluate it in the physical limit (q_+ -> q, q_- -> 0)
+    Kd_EOM_Table = [
+        [Physical_Limit(q_longlist, q_p_longlist, q_m_longlist, diff(Kd, q_m)) for q_m in qvec]
+        for qvec in q_m_Table
+    ]
 
     # Create Symbolic Equation of Motion Tables
-    # We don't have the EOM for pi_n+1 since it will not need to be solved
-    # implicitly later
-
+    # We don't have the EOM for pi_n+1 since it will not need to be solved implicitly later
     EOM_List = []
     for i in range(len(Ld_EOM_Table)):
         for j in range(1, len(Ld_EOM_Table[0]) - 1):
-            EOM_List.append(Ld_EOM_Table[i][j]
-                            + Kd_EOM_Table[i][j])
-        EOM_List.append(pi_n_list[i]
-                        + Ld_EOM_Table[i][0]
-                        + Kd_EOM_Table[i][0])
+            EOM_List.append(Ld_EOM_Table[i][j] + Kd_EOM_Table[i][j])
+
+        EOM_List.append(pi_n_list[i] + Ld_EOM_Table[i][0] + Kd_EOM_Table[i][0])
 
     # print EOM_List
     return EOM_List
 
 
-def Gen_J_Expr_Table(expr_vec, var_vec):
-    """Gen_J_Expr_Table generate a table of Jacobian
-    output:
-    J - Jacobian table of sympy expressions
-    where  J[i][j] = d(expr_vec[i])/d(var_vec[j])
-
-    input:
-    expr_vec - vector of sympy expressions
-    var_vec - vector of sympy variables
+def compute_jacobian(expr_vec, var_vec):
     """
-    J = []
-    for i in range(len(expr_vec)):
-        J_vec = []
-        for j in range(len(var_vec)):
-            J_vec.append(diff(expr_vec[i], var_vec[j]))
-        J.append(J_vec)
+    Generate a table representing the Jacobian of expr_vec with respect to var_vec.
+
+    Args:
+        expr_vec: The expressions to be differentiated
+        var_vec: The expressions with which to differentiate against.
+
+    Returns:
+        J - Jacobian table of sympy expressions where
+
+            J[i][j] = d(expr_vec[i])/d(var_vec[j])
+    """
+    J = [
+        [
+            diff(expr_vec[i], var_vec[j])
+            for j in range(len(var_vec))
+        ]
+        for i in range(len(expr_vec))
+    ]
 
     return J
 
@@ -427,26 +434,24 @@ def pi_ic_from_qdot(qdot_vec, q_vec,
                     tval, ddt,
                     pi_guess_vec,
                     qi_sol_func, qdot_n_func):
-    """This finds the initial condition for the pi vector
-    for a given qdot_vec and q_vec initial condition,
-    since pi depends on the choice of discretization.
+    """
+    This finds the initial condition for the pi vector for a given qdot_vec and q_vec initial condition, since pi
+    depends on the choice of discretization.
 
-    Outputs:
-    pi_init_sol - ndarray for the solution of that matches
-                  the initial condition in terms of q and
-                  qdot given
+    Args:
+        qdot_vec[dof] - ndarray of initial qdot to be matched
+        q_vec[dof] - ndarray of initial q
+        tval - float for the initial time
+        ddt - float for the time step size
+        pi_guess_vec[dof] - initial guess for pi
+        qi_sol_func - 1st function returned by Gen_GGL_NC_VI_Map
+                      that generates an ndarray for the qi_sol
+        qdot_n_func - 4th function returned by Gen_GGL_NC_VI_Map
+                      that calculates the value of qdot for a
+                      given pi_n
 
-    Inputs:
-    qdot_vec[dof] - ndarray of initial qdot to be matched
-    q_vec[dof] - ndarray of initial q
-    tval - float for the initial time
-    ddt - float for the time step size
-    pi_guess_vec[dof] - initial guess for pi
-    qi_sol_func - 1st function returned by Gen_GGL_NC_VI_Map
-                  that generates an ndarray for the qi_sol
-    qdot_n_func - 4th function returned by Gen_GGL_NC_VI_Map
-                  that calculates the value of qdot for a
-                  given pi_n
+    Returns:
+        pi_init_sol, an ndarray for the solution of that matches the initial condition in terms of q and qdot given.
     """
 
     def fun(pi_vec):
@@ -693,7 +698,7 @@ def Gen_GGL_NC_VI_Map(t_symbol,
             J_qi_vec.append(q_Table[i][j])
 
     # Generate the Jacobian function table
-    J_Expr_Table = Gen_J_Expr_Table(EOM_List, J_qi_vec)
+    J_Expr_Table = compute_jacobian(EOM_List, J_qi_vec)
     J_Func_Table = [[lambdify(tuple(full_variable_list),
                               J_Expr, modules=eval_modules)
                      for J_Expr in J_Expr_Vec]
