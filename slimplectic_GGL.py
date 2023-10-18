@@ -171,10 +171,12 @@ def GGL_q_Collocation_Table(qlist: list, collocation_point_count: int):
     return [form_row(q) for q in qlist]
 
 
-def DM_Sum(DMvec, qlist):
-    """Helper function to matrix dot product the DM matrix with a qvector
+def DM_Sum(DMvec: list, qlist: list):
+    """
+    Helper function to matrix dot product the DM matrix with a qvector
     Assumes that DMVec is the same length as qlist
     """
+    # TODO: To be replaced with dot product. I think the inputs are sympy expressions
     sum = 0
     for j in range(len(DMvec)):
         sum += DMvec[j] * qlist[j]
