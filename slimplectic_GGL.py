@@ -138,32 +138,37 @@ def Physical_Limit(q_list: list, q_p_list: list, q_m_list: list, expression):
     return expression.subs(sub_list)
 
 
-def GGL_q_Collocation_Table(qlist, cp_count):
-    """GGL_q_Collocation_Table creates the symbol tables necessary
-    to evaluate a degree of freedom at each of cp_count collocation
-    points, calling them qname^[n], qname^(i), qname^[n+1] for each qname in qlist.
-
-    Output:
-    __qtable[dof][cp_count]
-
-    Input:
-    qlist[dof] - the list of degree of freedom symbols you
-                 want to generate collocation symbols for
-    cp_count - the collocation point count
-
+def GGL_q_Collocation_Table(qlist: list, collocation_point_count: int):
     """
-    qtable = []
-    for q in qlist:
-        qvec = [Symbol("{" + repr(q)  # +"}"
-                       + "^{[n]}}")]
-        for i in range(1, cp_count - 1):
-            qvec.append(Symbol("{" + repr(q)  # +"}"
-                               + "^{(" + repr(i) + ")}}"))
-        qvec.append(Symbol("{" + repr(q)  # +"}"
-                           + "^{[n+1]}}"))
-        qtable.append(qvec)
+    Generates the symbol table to evaluate the degrees of freedom (in qlist) across the collocation points (number given
+    by `collocation_point_count`). This generates a table with 1 row per q in qlist, and columns given by:
 
-    return qtable
+        - q^[n], the initial point
+        - q^(i) for each internal collocation point
+        - q^[n + 1], the final point
+
+    Note that the first and last collocation points are the the initial and the final point.
+
+    Args:
+        qlist: The list of degrees of freedom
+        collocation_point_count: The number of collocation points between the final and initial point
+
+    Returns:
+        The symbol table as described above, (len(qlist), collocation_point_count)
+    """
+
+    form_row = lambda q: [
+        # The initial point of the quadrature
+        Symbol("{" + repr(q) + "^{[n]}}"),
+
+        # The interior points (starting from index)
+        *[Symbol("{" + repr(q) + "^{(" + repr(i) + ")}}") for i in range(1, collocation_point_count - 1)],
+
+        # The final point
+        Symbol("{" + repr(q) + "^{[n + 1]}}"),
+    ]
+
+    return [form_row(q) for q in qlist]
 
 
 def DM_Sum(DMvec, qlist):
@@ -177,8 +182,8 @@ def DM_Sum(DMvec, qlist):
 
 
 def GGL_Gen_Ld(tsymbol, q_list, qprime_list, L, ddt, r, paramlist=[], precision=20):
-    """GGL_Gen_Ld generates the discrete Lagrangian for use in determining
-    the GGL variational integrator.
+    """
+    GGL_Gen_Ld generates the discrete Lagrangian for use in determining the GGL variational integrator.
 
     Outputs:
     (Ld, q_Table)
