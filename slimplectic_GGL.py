@@ -4,7 +4,7 @@ import numpy
 import scipy.optimize
 
 
-def GGLdefs(r: int, precision: int = 20):
+def generate_collocation_points(r: int, precision: int = 20) -> tuple[list[float], list[float], list[list[float]]]:
     """
     Gives the Collocation points, weights and derivative matrix for the Galerkin-Gauss-Lobatto Variational Integrator as
     floats evaluated to precision.
@@ -208,7 +208,7 @@ def GGL_Gen_Ld(tsymbol, q_list, qprime_list, L, ddt, r, paramlist=[], precision=
                  for for best results)
     """
     # Initialize GGLdefs for collocation points, weights and derivative matrix
-    xs, ws, DM = GGLdefs(r, precision)
+    xs, ws, DM = generate_collocation_points(r, precision)
 
     # Create q_Table for all the algebraic variables based on q_list
     # q_Table[len(q_list)][r+2]
@@ -283,7 +283,7 @@ def GGL_Gen_Kd(tsymbol, q_p_list, q_m_list, qprime_p_list, qprime_m_list, K, ddt
                 for for best results)
     """
     # Initialize GGLdefs for collocation points, weights and derivative matrix
-    xs, ws, DM = GGLdefs(r, precision)
+    xs, ws, DM = generate_collocation_points(r, precision)
 
     # Create q_{p/m}_Table for all the algebraic variables based on q_list
     # q_{p/m}_Table[len(qlist)][r+2]
@@ -908,7 +908,7 @@ def Gen_GGL_NC_VI_Map(t_symbol,
         return numpy.array(pi_np1_vec)
 
     # We need DM for the dotq function
-    xs, ws, DM = GGLdefs(r)
+    xs, ws, DM = generate_collocation_points(r)
 
     def qdot_n_func(qi_sol, q_n_vec, pi_n_vec, tval, ddt):
         """This function uses the qi_sol from the first
