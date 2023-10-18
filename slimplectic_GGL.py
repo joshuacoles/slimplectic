@@ -190,7 +190,7 @@ def DM_Sum(DMvec: list, qlist: list):
     return sum
 
 
-def GGL_Gen_Ld(
+def discretise_lagrangian_and_coordinates(
         tsymbol: sympy.Symbol,
         q_list: list,
         qprime_list: list,
@@ -258,7 +258,7 @@ def GGL_Gen_Ld(
     return Ld, q_Table
 
 
-def GGL_Gen_Kd(
+def discretise_non_conservative_lagrangian_and_coordinates(
         tsymbol: sympy.Symbol,
         q_p_list: list,
         q_m_list: list,
@@ -652,10 +652,10 @@ def Gen_GGL_NC_VI_Map(
     # expressions
     ddt_symbol = Symbol('h_{GGL}')
 
-    # Determine the Ld and Kd symbolic expressions for this system
+    # Determine the discrete_lagrangian and discrete_non_conservative_lagrangian symbolic expressions for this system
     # As well as the q symbols for each dof and collocation point
 
-    Ld, q_Table = GGL_Gen_Ld(
+    discrete_lagrangian, q_table = discretise_lagrangian_and_coordinates(
         t_symbol,
         q_list, v_list,
         Lexpr,
@@ -665,7 +665,7 @@ def Gen_GGL_NC_VI_Map(
         precision=sym_precision
     )
 
-    Kd, q_p_Table, q_m_Table = GGL_Gen_Kd(
+    discrete_non_conservative_lagrangian, q_plus_table, q_minus_table = discretise_non_conservative_lagrangian_and_coordinates(
         t_symbol,
         q_p_list,
         q_m_list,
@@ -685,9 +685,9 @@ def Gen_GGL_NC_VI_Map(
     # q^[n] and q^(i)'s, but not q^[n+1]
     # (since pi_n+1 will be evaluated directly later)
     EOM_List = Gen_iter_EOM_List(
-        q_Table, q_p_Table, q_m_Table,
+        q_table, q_plus_table, q_minus_table,
         pi_n_list, pi_np1_list,
-        Ld, Kd,
+        discrete_lagrangian, discrete_non_conservative_lagrangian,
         ddt_symbol
     )
 
@@ -696,15 +696,15 @@ def Gen_GGL_NC_VI_Map(
     # the variables to be solved for by the implicit
     # method
     qi_symbol_list = []
-    for dof in range(len(q_Table)):
+    for dof in range(len(q_table)):
         for i in range(1, r + 2):
-            qi_symbol_list.append(q_Table[dof][i])
+            qi_symbol_list.append(q_table[dof][i])
 
     # Generate flat list of the symbols for lambdification
     full_variable_list = []
     for i in range(len(q_list)):
         for j in range(r + 2):
-            full_variable_list.append(q_Table[i][j])
+            full_variable_list.append(q_table[i][j])
         full_variable_list.append(pi_n_list[i])
     full_variable_list.append(t_symbol)
     full_variable_list.append(ddt_symbol)
@@ -720,9 +720,9 @@ def Gen_GGL_NC_VI_Map(
     # Generate the J_qi_vec sympy variables to take
     # the Jacobian with respect to
     J_qi_vec = []
-    for i in range(len(q_Table)):
+    for i in range(len(q_table)):
         for j in range(1, r + 2):
-            J_qi_vec.append(q_Table[i][j])
+            J_qi_vec.append(q_table[i][j])
 
     # Generate the Jacobian function table
     J_Expr_Table = compute_jacobian(EOM_List, J_qi_vec)
@@ -777,8 +777,8 @@ def Gen_GGL_NC_VI_Map(
     if method == 'explicit':
         # print 'EXPLICIT METHOD'
         qi_func_args = []
-        for dof in range(len(q_Table)):
-            qi_func_args.append(q_Table[dof][0])
+        for dof in range(len(q_table)):
+            qi_func_args.append(q_table[dof][0])
         for dof in range(len(pi_n_list)):
             qi_func_args.append(pi_n_list[dof])
         qi_func_args.append(t_symbol)
@@ -865,17 +865,15 @@ def Gen_GGL_NC_VI_Map(
                 qi_0.append(q_n_vec[i])
         qi_0 = numpy.array(qi_0)
 
-        qi_sol = scipy.optimize.root(**dict(list({'fun': EOM_Val_Vec,
-                                                  'x0': qi_0,
-                                                  'args': (q_n_vec,
-                                                           pi_n_vec,
-                                                           tval,
-                                                           ddt),
-                                                  'jac': EOM_J_Matrix
-                                                  }.items())
-                                            + list(root_args.items())
-                                            )
-                                     )
+        combined_root_args = {
+            'fun': EOM_Val_Vec,
+            'x0': qi_0,
+            'args': (q_n_vec, pi_n_vec, tval, ddt),
+            'jac': EOM_J_Matrix,
+            **root_args
+        }
+
+        qi_sol = scipy.optimize.root(**combined_root_args)
         return qi_sol.x
 
     def q_np1_func(qi_sol, q_n_vec, pi_n_vec, tval, ddt):
@@ -902,15 +900,15 @@ def Gen_GGL_NC_VI_Map(
     # Here are some variables and functions to help
     # with creating the output functions
 
-    q_longlist = [q for qvec in q_Table for q in qvec]
-    q_p_longlist = [q for qvec in q_p_Table for q in qvec]
-    q_m_longlist = [q for qvec in q_m_Table for q in qvec]
-    pi_n_expr = [diff(Ld, q_Table[dof][-1])
+    q_longlist = [q for qvec in q_table for q in qvec]
+    q_p_longlist = [q for qvec in q_plus_table for q in qvec]
+    q_m_longlist = [q for qvec in q_minus_table for q in qvec]
+    pi_n_expr = [diff(discrete_lagrangian, q_table[dof][-1])
                  + Physical_Limit(q_longlist,
                                   q_p_longlist,
                                   q_m_longlist,
-                                  diff(Kd, q_m_Table[dof][-1]))
-                 for dof in range(len(q_Table))]
+                                  diff(discrete_non_conservative_lagrangian, q_minus_table[dof][-1]))
+                 for dof in range(len(q_table))]
     # return pi_n_expr
 
     pi_Func_Vec = [lambdify(full_variable_list,
@@ -939,16 +937,15 @@ def Gen_GGL_NC_VI_Map(
                                         pi_n_vec,
                                         tval,
                                         ddt, r=r)
-        pi_np1_vec = [pi_func(*tuple(EOM_Arg_list))
-                      for pi_func in pi_Func_Vec]
+        pi_np1_vec = [pi_func(*tuple(EOM_Arg_list)) for pi_func in pi_Func_Vec]
 
         # print qi_sol, q_n_vec, pi_n_vec, ddt
         # print pi_np1_vec
 
         return numpy.array(pi_np1_vec)
 
-    # We need DM for the dotq function
-    xs, ws, DM = generate_collocation_points(r)
+    # We need derivative_matrix for the dotq function
+    collocation_points, point_weights, derivative_matrix = generate_collocation_points(r)
 
     def qdot_n_func(qi_sol, q_n_vec, pi_n_vec, tval, ddt):
         """This function uses the qi_sol from the first
@@ -976,7 +973,7 @@ def Gen_GGL_NC_VI_Map(
                 qi_vec.append(qi_sol[dof * (r + 1) + i])
             qi_table.append(qi_vec)
 
-        qdot_vec = [numpy.dot(numpy.array(DM), qi_vec)[0] * 2 / ddt
+        qdot_vec = [numpy.dot(numpy.array(derivative_matrix), qi_vec)[0] * 2 / ddt
                     for qi_vec in qi_table]
         return numpy.array(qdot_vec, dtype=float)
 
@@ -993,26 +990,26 @@ def Gen_GGL_NC_VI_Map(
 
         if verbose_rational:
             print('\t L_d^n = '
-                  + latex(nsimplify(Ld,
+                  + latex(nsimplify(discrete_lagrangian,
                                     tolerance=1e-15,
                                     rational=True)))
         else:
-            print('\t L_d^n = ' + latex(simplify(Ld)))
+            print('\t L_d^n = ' + latex(simplify(discrete_lagrangian)))
 
         print('The Order ' + repr(2 * r + 2) + ' discretized K-potential is:')
         if verbose_rational:
             print('\t K_d^n = '
-                  + latex(nsimplify(Kd,
+                  + latex(nsimplify(discrete_non_conservative_lagrangian,
                                     tolerance=1e-12,
                                     rational=verbose_rational)))
         else:
-            print('\t K_d^n = ' + latex(simplify(Kd)))
+            print('\t K_d^n = ' + latex(simplify(discrete_non_conservative_lagrangian)))
 
         print('********************')
         print('The Order ' + repr(2 * r + 2) + ' Discretized Equations of motion:')
 
         if verbose_rational:
-            for dof in range(len(q_Table)):
+            for dof in range(len(q_table)):
                 for i in range(r + 1):
                     print('\t0 = ' + latex(nsimplify(expand(EOM_List[dof * (r + 1) + i]),
                                                      tolerance=1e-15,
@@ -1022,7 +1019,7 @@ def Gen_GGL_NC_VI_Map(
                                                  rational=verbose_rational)))
 
         else:
-            for dof in range(len(q_Table)):
+            for dof in range(len(q_table)):
                 for i in range(r + 1):
                     print('\t0 = ' + latex(simplify(expand(EOM_List[dof * (r + 1) + i]))))
                 print('\t0 = ' + latex(-pi_np1_list[dof] + simplify(expand(pi_n_expr[dof]))))
