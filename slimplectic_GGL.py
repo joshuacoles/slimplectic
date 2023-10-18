@@ -506,6 +506,30 @@ def pi_ic_from_qnext(
     return scipy.optimize.root(fun, pi_guess_vec)
 
 
+def Convert_EOM_Args(qi_vec, qn_vec, pi_nvec, tval, ddt, r):
+    # Convert_EOM_Args returns an argument list for the lambdified EOM functions.
+    # this should be [q_1^[n], q_1^(i), q_1^[n+1], pi_1^n,...]
+    # these should all be numerical values
+    EOM_arg_list = []
+    dof_count = len(qn_vec)
+
+    for dof in range(dof_count):
+        # q^[n]
+        EOM_arg_list.append(qn_vec[dof])
+
+        # q^(i)
+        for i in range(r + 1):
+            EOM_arg_list.append(qi_vec[dof * (r + 1) + i])
+
+        # pi^n
+        EOM_arg_list.append(pi_nvec[dof])
+
+    EOM_arg_list.append(tval)
+    EOM_arg_list.append(ddt)
+
+    return EOM_arg_list
+
+
 def Gen_GGL_NC_VI_Map(
         t_symbol,
         q_list, q_p_list, q_m_list,
@@ -620,6 +644,10 @@ def Gen_GGL_NC_VI_Map(
                        if False values will be left as floats.
     """
 
+    if not (method in ['implicit', 'explicit']):
+        print(f"GGL_NC_VI ERROR: method = {method} unknown.")
+        return
+
     # Define the symbol for h, that we will use in the algebraic
     # expressions
     ddt_symbol = Symbol('h_{GGL}')
@@ -627,25 +655,28 @@ def Gen_GGL_NC_VI_Map(
     # Determine the Ld and Kd symbolic expressions for this system
     # As well as the q symbols for each dof and collocation point
 
-    Ld, q_Table \
-        = GGL_Gen_Ld(t_symbol,
-                     q_list, v_list,
-                     Lexpr,
-                     ddt_symbol,
-                     r,
-                     paramlist=sym_paramlist,
-                     precision=sym_precision)
-    Kd, q_p_Table, q_m_Table \
-        = GGL_Gen_Kd(t_symbol,
-                     q_p_list,
-                     q_m_list,
-                     v_p_list,
-                     v_m_list,
-                     Kexpr,
-                     ddt_symbol,
-                     r,
-                     paramlist=sym_paramlist,
-                     precision=sym_precision)
+    Ld, q_Table = GGL_Gen_Ld(
+        t_symbol,
+        q_list, v_list,
+        Lexpr,
+        ddt_symbol,
+        r,
+        paramlist=sym_paramlist,
+        precision=sym_precision
+    )
+
+    Kd, q_p_Table, q_m_Table = GGL_Gen_Kd(
+        t_symbol,
+        q_p_list,
+        q_m_list,
+        v_p_list,
+        v_m_list,
+        Kexpr,
+        ddt_symbol,
+        r,
+        paramlist=sym_paramlist,
+        precision=sym_precision
+    )
 
     # Generate momenta symbol lists
     pi_n_list, pi_np1_list = Gen_pi_list(q_list)
@@ -653,10 +684,12 @@ def Gen_GGL_NC_VI_Map(
     # Generate the Equation of Motion Table for
     # q^[n] and q^(i)'s, but not q^[n+1]
     # (since pi_n+1 will be evaluated directly later)
-    EOM_List = Gen_iter_EOM_List(q_Table, q_p_Table, q_m_Table,
-                                 pi_n_list, pi_np1_list,
-                                 Ld, Kd,
-                                 ddt_symbol)
+    EOM_List = Gen_iter_EOM_List(
+        q_Table, q_p_Table, q_m_Table,
+        pi_n_list, pi_np1_list,
+        Ld, Kd,
+        ddt_symbol
+    )
 
     # return EOM_List
     # qi symbol list: q^i and q^n+1 for each dof
@@ -677,23 +710,6 @@ def Gen_GGL_NC_VI_Map(
     full_variable_list.append(ddt_symbol)
 
     # print full_variable_list
-
-    def Convert_EOM_Args(qi_vec, qn_vec, pi_nvec, tval, ddt):
-        # Convert_EOM_Args returns an argument list for
-        # for the lambdified EOM functions.
-        # this should be [q_1^[n], q_1^(i), q_1^[n+1], pi_1^n,...]
-        # these should all be numerical values
-        EOM_arg_list = []
-        dof_count = len(qn_vec)
-        for dof in range(dof_count):
-            EOM_arg_list.append(qn_vec[dof])
-            for i in range(r + 1):
-                EOM_arg_list.append(qi_vec[dof * (r + 1) + i])
-            EOM_arg_list.append(pi_nvec[dof])
-        EOM_arg_list.append(tval)
-        EOM_arg_list.append(ddt)
-        # print EOM_arg_list
-        return EOM_arg_list
 
     # Generate the list of functions for evaulating the EOM
     EOM_Func_List = [lambdify(tuple(full_variable_list),
@@ -728,7 +744,7 @@ def Gen_GGL_NC_VI_Map(
                                         qn_vec,
                                         pi_nvec,
                                         tval,
-                                        ddt)
+                                        ddt, r=r)
         # print EOM_arg_list
         # Next we evaulate the EOM functions
         # in EOM_List
@@ -748,7 +764,7 @@ def Gen_GGL_NC_VI_Map(
                                         q_n_vec,
                                         pi_n_vec,
                                         tval,
-                                        ddt)
+                                        ddt, r=r)
         # Next Evaluate the J_Matrix
         J_Matrix = [[J_Func(*tuple(EOM_arg_list))
                      for J_Func in J_Func_Vec]
@@ -922,7 +938,7 @@ def Gen_GGL_NC_VI_Map(
                                         q_n_vec,
                                         pi_n_vec,
                                         tval,
-                                        ddt)
+                                        ddt, r=r)
         pi_np1_vec = [pi_func(*tuple(EOM_Arg_list))
                       for pi_func in pi_Func_Vec]
 
@@ -1015,8 +1031,5 @@ def Gen_GGL_NC_VI_Map(
     #########################
     if method == 'implicit':
         return qi_sol_func_implicit, q_np1_func, pi_np1_func, qdot_n_func
-    elif method == 'explicit':
-        return qi_sol_func_explicit, q_np1_func, pi_np1_func, qdot_n_func
     else:
-        print("GGL_NC_VI ERROR: method = " + method + " unknown.")
-        return
+        return qi_sol_func_explicit, q_np1_func, pi_np1_func, qdot_n_func
