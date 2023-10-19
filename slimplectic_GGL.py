@@ -506,10 +506,12 @@ def pi_ic_from_qnext(
     return scipy.optimize.root(fun, pi_guess_vec)
 
 
-def Convert_EOM_Args(qi_vec, qn_vec, pi_nvec, tval, ddt, r):
-    # Convert_EOM_Args returns an argument list for the lambdified EOM functions.
-    # this should be [q_1^[n], q_1^(i), q_1^[n+1], pi_1^n,...]
-    # these should all be numerical values
+def prep_eom_arguments(qi_vec, qn_vec, pi_nvec, tval, ddt, r):
+    """
+    Convert_EOM_Args returns an argument list for the lambdified EOM functions.
+    this should be [q_1^[n], q_1^(i), q_1^[n+1], pi_1^n,...]
+    these should all be numerical values
+    """
     EOM_arg_list = []
     dof_count = len(qn_vec)
 
@@ -528,6 +530,35 @@ def Convert_EOM_Args(qi_vec, qn_vec, pi_nvec, tval, ddt, r):
     EOM_arg_list.append(ddt)
 
     return EOM_arg_list
+
+
+def symbol_corral(q_list, q_table, pi_n_list, t_symbol, ddt_symbol, r):
+    # qi symbol list: q^i and q^n+1 for each dof
+    # the variables to be solved for by the implicit
+    # method
+    qi_symbol_list = []
+    for dof in range(len(q_table)):
+        for i in range(1, r + 2):
+            qi_symbol_list.append(q_table[dof][i])
+
+    # Generate flat list of the symbols for lambdification. Note this list is order dependent
+    # This should be in the corrosponding order to the prep_eom_arguments function
+    full_variable_list = []
+    for i in range(len(q_list)):
+        for j in range(r + 2):
+            full_variable_list.append(q_table[i][j])
+        full_variable_list.append(pi_n_list[i])
+    full_variable_list.append(t_symbol)
+    full_variable_list.append(ddt_symbol)
+
+    # # Generate the J_qi_vec sympy variables to take
+    # # the Jacobian with respect to
+    # J_qi_vec = []
+    # for i in range(len(q_table)):
+    #     for j in range(1, r + 2):
+    #         J_qi_vec.append(q_table[i][j])
+
+    return qi_symbol_list, full_variable_list, qi_symbol_list
 
 
 def Gen_GGL_NC_VI_Map(
@@ -692,33 +723,6 @@ def Gen_GGL_NC_VI_Map(
         ddt_symbol
     )
 
-    def symbol_corral(q_table, pi_n_list, t_symbol, ddt_symbol, r):
-        # qi symbol list: q^i and q^n+1 for each dof
-        # the variables to be solved for by the implicit
-        # method
-        qi_symbol_list = []
-        for dof in range(len(q_table)):
-            for i in range(1, r + 2):
-                qi_symbol_list.append(q_table[dof][i])
-
-        # Generate flat list of the symbols for lambdification. Note this list is order dependent
-        full_variable_list = []
-        for i in range(len(q_list)):
-            for j in range(r + 2):
-                full_variable_list.append(q_table[i][j])
-            full_variable_list.append(pi_n_list[i])
-        full_variable_list.append(t_symbol)
-        full_variable_list.append(ddt_symbol)
-
-        # # Generate the J_qi_vec sympy variables to take
-        # # the Jacobian with respect to
-        # J_qi_vec = []
-        # for i in range(len(q_table)):
-        #     for j in range(1, r + 2):
-        #         J_qi_vec.append(q_table[i][j])
-
-        return qi_symbol_list, full_variable_list, qi_symbol_list
-
     # We have collected all the sympy corralling into a helper function. This has the following behavior:
     #   - qi_symbol_list: a flat list containing 'q^i's and q^n+1 for each dof, the variables to be solved for by the
     #     implicit method.
@@ -731,7 +735,7 @@ def Gen_GGL_NC_VI_Map(
     #
     # qi_symbol_list and J_qi_vec are the variables to be solved for by the implicit method.
     qi_symbol_list, full_variable_list, J_qi_vec = symbol_corral(
-        q_table, pi_n_list, t_symbol, ddt_symbol, r=r
+        q_list, q_table, pi_n_list, t_symbol, ddt_symbol, r
     )
 
     # Generate the list of functions for evaluating the EOM
@@ -755,15 +759,15 @@ def Gen_GGL_NC_VI_Map(
     def EOM_Val_Vec(qi_vec, qn_vec, pi_nvec, tval, ddt, r=r):
         # First convert the argument list for
         # the lambdified functions
-        EOM_arg_list = Convert_EOM_Args(qi_vec,
-                                        qn_vec,
-                                        pi_nvec,
-                                        tval,
-                                        ddt, r=r)
+        EOM_arg_list = prep_eom_arguments(qi_vec,
+                                          qn_vec,
+                                          pi_nvec,
+                                          tval,
+                                          ddt, r=r)
         # print EOM_arg_list
         # Next we evaulate the EOM functions
         # in EOM_List
-        out = numpy.array([EOM_Func(*tuple(EOM_arg_list)) for EOM_Func in eom_functions])
+        out = numpy.array([eom_f(*tuple(EOM_arg_list)) for eom_f in eom_functions])
 
         return out
 
@@ -776,11 +780,11 @@ def Gen_GGL_NC_VI_Map(
 
         # First convert the argument list for
         # the lambdified functions
-        EOM_arg_list = Convert_EOM_Args(qi_vec,
-                                        q_n_vec,
-                                        pi_n_vec,
-                                        tval,
-                                        ddt, r=r)
+        EOM_arg_list = prep_eom_arguments(qi_vec,
+                                          q_n_vec,
+                                          pi_n_vec,
+                                          tval,
+                                          ddt, r=r)
         # Next Evaluate the J_Matrix
         J_Matrix = [
             [J_Func(*tuple(EOM_arg_list)) for J_Func in J_Func_Vec]
@@ -892,7 +896,8 @@ def Gen_GGL_NC_VI_Map(
         return qi_sol.x
 
     def q_np1_func(qi_sol, q_n_vec, pi_n_vec, tval, ddt):
-        """This function uses the qi_sol from the first
+        """
+        This function uses the qi_sol from the first
         Gen_GGL_NC_VI_Map returned function to calculate
         the q's for the next step. In this case it will be just a
         simple lookup.
@@ -946,11 +951,11 @@ def Gen_GGL_NC_VI_Map(
         tval - float for the current value of time
         ddt - float for the size of the time step
         """
-        EOM_Arg_list = Convert_EOM_Args(qi_sol,
-                                        q_n_vec,
-                                        pi_n_vec,
-                                        tval,
-                                        ddt, r=r)
+        EOM_Arg_list = prep_eom_arguments(qi_sol,
+                                          q_n_vec,
+                                          pi_n_vec,
+                                          tval,
+                                          ddt, r=r)
         pi_np1_vec = [pi_func(*tuple(EOM_Arg_list)) for pi_func in pi_Func_Vec]
 
         # print qi_sol, q_n_vec, pi_n_vec, ddt
