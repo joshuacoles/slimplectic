@@ -199,7 +199,7 @@ def discretise_lagrangian_and_coordinates(
         r: int,
         paramlist: list[tuple[sympy.Expr, sympy.Expr]] = [],
         precision: int = 20
-):
+) -> tuple[sympy.Expr, list[list[sympy.Expr]]]:
     """
     Generates the discrete Lagrangian for use in determining the GGL variational integrator.
 
@@ -245,7 +245,7 @@ def discretise_lagrangian_and_coordinates(
     # Evaluate Ld which is the weighted sum over each point, using the global paramlist substitutions as well as local
     # substitutions for each quadrature location according to the q_Table, dphidt_Table, and t_list generated above.
     # TODO: This will become evaluation of functions and normal sums in JAX
-    Ld = 0
+    Ld = S.Zero
     for i in range(r + 2):
         local_substitutions = []
         for j in range(len(q_list)):
@@ -269,7 +269,7 @@ def discretise_non_conservative_lagrangian_and_coordinates(
         r: int,
         paramlist: list[tuple[sympy.Expr, sympy.Expr]] = [],
         precision=20
-):
+) -> tuple[sympy.Expr, list[list[sympy.Expr]], list[list[sympy.Expr]]]:
     """
     Generates the discrete non-conserative Lagrangian $K$ for use in determining the GGL variational integrator.
 
@@ -326,7 +326,7 @@ def discretise_non_conservative_lagrangian_and_coordinates(
 
     # Create list of substitution pairs used at each quadrature location
     # Evaluate Ld which is the weighted sum over each point
-    Kd = 0
+    Kd = S.Zero
     for i in range(r + 2):
         local_substitutions = []
         for j in range(len(q_p_list)):
@@ -687,49 +687,64 @@ def Gen_GGL_NC_VI_Map(
     EOM_List = Gen_iter_EOM_List(
         q_table, q_plus_table, q_minus_table,
         pi_n_list, pi_np1_list,
-        discrete_lagrangian, discrete_non_conservative_lagrangian,
+        discrete_lagrangian,
+        discrete_non_conservative_lagrangian,
         ddt_symbol
     )
 
-    # return EOM_List
-    # qi symbol list: q^i and q^n+1 for each dof
-    # the variables to be solved for by the implicit
-    # method
-    qi_symbol_list = []
-    for dof in range(len(q_table)):
-        for i in range(1, r + 2):
-            qi_symbol_list.append(q_table[dof][i])
+    def symbol_corral(q_table, pi_n_list, t_symbol, ddt_symbol, r):
+        # qi symbol list: q^i and q^n+1 for each dof
+        # the variables to be solved for by the implicit
+        # method
+        qi_symbol_list = []
+        for dof in range(len(q_table)):
+            for i in range(1, r + 2):
+                qi_symbol_list.append(q_table[dof][i])
 
-    # Generate flat list of the symbols for lambdification
-    full_variable_list = []
-    for i in range(len(q_list)):
-        for j in range(r + 2):
-            full_variable_list.append(q_table[i][j])
-        full_variable_list.append(pi_n_list[i])
-    full_variable_list.append(t_symbol)
-    full_variable_list.append(ddt_symbol)
+        # Generate flat list of the symbols for lambdification. Note this list is order dependent
+        full_variable_list = []
+        for i in range(len(q_list)):
+            for j in range(r + 2):
+                full_variable_list.append(q_table[i][j])
+            full_variable_list.append(pi_n_list[i])
+        full_variable_list.append(t_symbol)
+        full_variable_list.append(ddt_symbol)
 
-    # print full_variable_list
+        # # Generate the J_qi_vec sympy variables to take
+        # # the Jacobian with respect to
+        # J_qi_vec = []
+        # for i in range(len(q_table)):
+        #     for j in range(1, r + 2):
+        #         J_qi_vec.append(q_table[i][j])
 
-    # Generate the list of functions for evaulating the EOM
-    EOM_Func_List = [lambdify(tuple(full_variable_list),
-                              EOM,
-                              modules=eval_modules)
-                     for EOM in EOM_List]
+        return qi_symbol_list, full_variable_list, qi_symbol_list
 
-    # Generate the J_qi_vec sympy variables to take
-    # the Jacobian with respect to
-    J_qi_vec = []
-    for i in range(len(q_table)):
-        for j in range(1, r + 2):
-            J_qi_vec.append(q_table[i][j])
+    # We have collected all the sympy corralling into a helper function. This has the following behavior:
+    #   - qi_symbol_list: a flat list containing 'q^i's and q^n+1 for each dof, the variables to be solved for by the
+    #     implicit method.
+    #
+    #   - full_variable_list: a flat list containing all the symbols for lambdification. Note this list is order
+    #     dependent
+    #
+    #   - J_qi_vec: a flat list containing the J_qi sympy variables to take the Jacobian with respect to.
+    #       - NOTE: This is the same as qi_symbol_list, but is used for the Jacobian function table.
+    #
+    # qi_symbol_list and J_qi_vec are the variables to be solved for by the implicit method.
+    qi_symbol_list, full_variable_list, J_qi_vec = symbol_corral(
+        q_table, pi_n_list, t_symbol, ddt_symbol, r=r
+    )
+
+    # Generate the list of functions for evaluating the EOM
+    eom_functions = [
+        lambdify(full_variable_list, equations_of_motion, modules=eval_modules)
+        for equations_of_motion in EOM_List
+    ]
 
     # Generate the Jacobian function table
-    J_Expr_Table = compute_jacobian(EOM_List, J_qi_vec)
-    J_Func_Table = [[lambdify(tuple(full_variable_list),
-                              J_Expr, modules=eval_modules)
-                     for J_Expr in J_Expr_Vec]
-                    for J_Expr_Vec in J_Expr_Table]
+    J_Func_Table = [
+        [lambdify(full_variable_list, J_Expr, modules=eval_modules) for J_Expr in J_Expr_Vec]
+        for J_Expr_Vec in compute_jacobian(EOM_List, J_qi_vec)
+    ]
 
     # EOM_Val_Vec is the function to be passed to
     # scipy.optimize.root() that returns the Equation
@@ -748,16 +763,17 @@ def Gen_GGL_NC_VI_Map(
         # print EOM_arg_list
         # Next we evaulate the EOM functions
         # in EOM_List
-        out = numpy.array([EOM_Func(*tuple(EOM_arg_list))
-                           for EOM_Func in EOM_Func_List])
-        # print out
+        out = numpy.array([EOM_Func(*tuple(EOM_arg_list)) for EOM_Func in eom_functions])
+
         return out
 
-    # compute_eom_jacobian is the function to be passed
-    # to scipy.optimize.root() that returns the
-    # Jacobian matrix for
-
     def compute_eom_jacobian(qi_vec, q_n_vec, pi_n_vec, tval, ddt, r):
+        """
+        compute_eom_jacobian is the function to be passed
+        to scipy.optimize.root() that returns the
+        Jacobian matrix for
+        """
+
         # First convert the argument list for
         # the lambdified functions
         EOM_arg_list = Convert_EOM_Args(qi_vec,
@@ -766,11 +782,10 @@ def Gen_GGL_NC_VI_Map(
                                         tval,
                                         ddt, r=r)
         # Next Evaluate the J_Matrix
-        J_Matrix = [[J_Func(*tuple(EOM_arg_list))
-                     for J_Func in J_Func_Vec]
-                    for J_Func_Vec in J_Func_Table]
-        # print "J_matrix:"
-        # print J_Matrix
+        J_Matrix = [
+            [J_Func(*tuple(EOM_arg_list)) for J_Func in J_Func_Vec]
+            for J_Func_Vec in J_Func_Table
+        ]
 
         return numpy.array(J_Matrix)
 
@@ -911,8 +926,7 @@ def Gen_GGL_NC_VI_Map(
                  for dof in range(len(q_table))]
     # return pi_n_expr
 
-    pi_Func_Vec = [lambdify(full_variable_list,
-                            expr, modules=eval_modules)
+    pi_Func_Vec = [lambdify(full_variable_list, expr, modules=eval_modules)
                    for expr in pi_n_expr]
 
     def pi_np1_func(qi_sol, q_n_vec, pi_n_vec, tval, ddt):
