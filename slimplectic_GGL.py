@@ -91,7 +91,7 @@ def q_Generate_pm(qlist: list):
 
 def Gen_pi_list(qlist: list):
     """
-    Generate_pi generates the symbol list for the non-conservative discrete momenta pi
+    Generates the symbol list for the non-conservative discrete momenta pi
 
     Output: (pi_n_list, pi_np1_list)
     pi_n_list[dof] - list of symbols for the current pi_n
@@ -737,7 +737,7 @@ def Gen_GGL_NC_VI_Map(
     # the correct values extra arguments qn_vec, pi_nvec,
     # t, and ddt should be passed as well
 
-    def EOM_Val_Vec(qi_vec, qn_vec, pi_nvec, tval, ddt):
+    def EOM_Val_Vec(qi_vec, qn_vec, pi_nvec, tval, ddt, r=r):
         # First convert the argument list for
         # the lambdified functions
         EOM_arg_list = Convert_EOM_Args(qi_vec,
@@ -753,11 +753,11 @@ def Gen_GGL_NC_VI_Map(
         # print out
         return out
 
-    # EOM_J_Matrix is the function to be passed
+    # compute_eom_jacobian is the function to be passed
     # to scipy.optimize.root() that returns the
     # Jacobian matrix for
 
-    def EOM_J_Matrix(qi_vec, q_n_vec, pi_n_vec, tval, ddt):
+    def compute_eom_jacobian(qi_vec, q_n_vec, pi_n_vec, tval, ddt, r):
         # First convert the argument list for
         # the lambdified functions
         EOM_arg_list = Convert_EOM_Args(qi_vec,
@@ -868,8 +868,8 @@ def Gen_GGL_NC_VI_Map(
         combined_root_args = {
             'fun': EOM_Val_Vec,
             'x0': qi_0,
-            'args': (q_n_vec, pi_n_vec, tval, ddt),
-            'jac': EOM_J_Matrix,
+            'args': (q_n_vec, pi_n_vec, tval, ddt, r),
+            'jac': compute_eom_jacobian,
             **root_args
         }
 
