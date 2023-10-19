@@ -750,13 +750,37 @@ def Gen_GGL_NC_VI_Map(
         for J_Expr_Vec in compute_jacobian(EOM_List, J_qi_vec)
     ]
 
-    # EOM_Val_Vec is the function to be passed to
-    # scipy.optimize.root() that returns the Equation
-    # of Motion evaulations that should be zero for
-    # the correct values extra arguments qn_vec, pi_nvec,
-    # t, and ddt should be passed as well
+    # Here are some variables and functions to help
+    # with creating the output functions
+
+    q_longlist = flatten_table(q_table)
+    q_p_longlist = flatten_table(q_plus_table)
+    q_m_longlist = flatten_table(q_minus_table)
+
+    pi_n_expr = [
+        diff(discrete_lagrangian, q_table[dof][-1])
+        + Physical_Limit(
+            q_longlist, q_p_longlist, q_m_longlist,
+            diff(discrete_non_conservative_lagrangian, q_minus_table[dof][-1])
+        )
+        for dof in range(len(q_table))
+    ]
+
+    pi_Func_Vec = [lambdify(full_variable_list, expr, modules=eval_modules)
+                   for expr in pi_n_expr]
+
+    # We need derivative_matrix for the dotq function
+    collocation_points, point_weights, derivative_matrix = generate_collocation_points(r)
 
     def EOM_Val_Vec(qi_vec, qn_vec, pi_nvec, tval, ddt, r=r):
+        """
+        EOM_Val_Vec is the function to be passed to
+        scipy.optimize.root() that returns the Equation
+        of Motion evaulations that should be zero for
+        the correct values extra arguments qn_vec, pi_nvec,
+        t, and ddt should be passed as well
+        """
+
         # First convert the argument list for
         # the lambdified functions
         EOM_arg_list = prep_eom_arguments(qi_vec,
@@ -793,6 +817,9 @@ def Gen_GGL_NC_VI_Map(
 
         return numpy.array(J_Matrix)
 
+    # These are the output functions:
+    #############################
+
     if method == 'explicit':
         # print 'EXPLICIT METHOD'
         qi_func_args = []
@@ -821,10 +848,6 @@ def Gen_GGL_NC_VI_Map(
         # print qi_sol_list
         # print qi_sol_list
 
-    # These are the output functions:
-    #############################
-
-    if method == 'explicit':
         def qi_sol_func_explicit(q_n_vec, pi_n_vec, tval, ddt, root_args={}):
             """This function evaluates the explicit equations
             for the intemediate points [{q_1^(i)_0}, q_1^[n+1]_0, ...]
@@ -856,8 +879,7 @@ def Gen_GGL_NC_VI_Map(
 
             return numpy.array(qi_sol)
 
-    def qi_sol_func_implicit(q_n_vec, pi_n_vec, tval, ddt,
-                             root_args={'tol': 1e-10}):
+    def qi_sol_func_implicit(q_n_vec, pi_n_vec, tval, ddt, root_args={'tol': 1e-10}):
         """This function uses q_n_vec as a guess for each of the
         intermediate points [{q_1^(i)_0}, q_1^[n+1]_0, ...]
         to generate the iterated intermediate results
@@ -917,23 +939,6 @@ def Gen_GGL_NC_VI_Map(
         q_np1_vec = [qi_sol[dof * (r + 1) + r] for dof in range(len(q_n_vec))]
         return numpy.array(q_np1_vec)
 
-    # Here are some variables and functions to help
-    # with creating the output functions
-
-    q_longlist = [q for qvec in q_table for q in qvec]
-    q_p_longlist = [q for qvec in q_plus_table for q in qvec]
-    q_m_longlist = [q for qvec in q_minus_table for q in qvec]
-    pi_n_expr = [diff(discrete_lagrangian, q_table[dof][-1])
-                 + Physical_Limit(q_longlist,
-                                  q_p_longlist,
-                                  q_m_longlist,
-                                  diff(discrete_non_conservative_lagrangian, q_minus_table[dof][-1]))
-                 for dof in range(len(q_table))]
-    # return pi_n_expr
-
-    pi_Func_Vec = [lambdify(full_variable_list, expr, modules=eval_modules)
-                   for expr in pi_n_expr]
-
     def pi_np1_func(qi_sol, q_n_vec, pi_n_vec, tval, ddt):
         """This function uses the qi_sol from the first
         Gen_GGL_NC_VI_Map returned function to calculate
@@ -962,9 +967,6 @@ def Gen_GGL_NC_VI_Map(
         # print pi_np1_vec
 
         return numpy.array(pi_np1_vec)
-
-    # We need derivative_matrix for the dotq function
-    collocation_points, point_weights, derivative_matrix = generate_collocation_points(r)
 
     def qdot_n_func(qi_sol, q_n_vec, pi_n_vec, tval, ddt):
         """This function uses the qi_sol from the first
