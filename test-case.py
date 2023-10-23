@@ -25,6 +25,7 @@ t = dt * np.arange(0, int(tmax / dt) + 1)
 # Initial data (at t=0)
 q0 = [1.]
 pi0 = [0.25 * dt * k]
+
 # The initial condition for pi0 is chosen because the 2nd order slimplectic method
 # has $\pi$ actually evaluated at the mid-step, and it needs corrections to that effect.
 # Otherwise, the phase is off and the energy has a constant offset.

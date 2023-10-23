@@ -62,14 +62,16 @@ class GalerkinGaussLobatto(object):
               verbose: Boolean. True to output mapping expressions (default False)
         output: none
         """
-        self._qi_soln_map, self._q_np1_map, self._pi_np1_map, self._qdot_n_map = ggl.Gen_GGL_NC_VI_Map(self.t, \
-                                                                                                       self.q, self.qp,
-                                                                                                       self.qm, \
-                                                                                                       self.v, self.vp,
-                                                                                                       self.vm, \
-                                                                                                       L, K, order,
-                                                                                                       method=method,
-                                                                                                       verbose=verbose)
+        self._qi_soln_map, self._q_np1_map, self._pi_np1_map, self._qdot_n_map = ggl.Gen_GGL_NC_VI_Map(
+            self.t,
+            self.q, self.qp,
+            self.qm,
+            self.v, self.vp,
+            self.vm,
+            L, K, order,
+            method=method,
+            verbose=verbose
+        )
 
     def integrate(self, q0_list, pi0_list, t, dt=False, output_v=False, output_File=False, t_out=[False],
                   print_steps=1):
@@ -104,10 +106,6 @@ class GalerkinGaussLobatto(object):
         pi_list_soln = np.zeros((t_len + 1, self._num_dof))
         qdot_list_soln = np.zeros((t_len + 1, self._num_dof))
 
-        # Open output file if necessary
-        if output_File:
-            outfile = open(output_File, "w")
-
         # Set initial data
         q_list_soln[0, :] = q0_list
         # mod the value of any periodic variables that have mod value specified
@@ -118,57 +116,39 @@ class GalerkinGaussLobatto(object):
                 q_list_soln[0, jj] = q_list_soln[0, jj] % mod
         pi_list_soln[0, :] = pi0_list
 
-        if output_File:
-            outstring = 'step'
-            outstring += ', t'
-            for dof in range(len(q_list_soln[0])):
-                outstring += ', {:s}'.format(str(self.q[dof]))
-            for dof in range(len(pi_list_soln[0])):
-                outstring += ', pi_{:s}'.format(str(self.q[dof]))
-            if output_v:
-                for dof in range(len(q_list_soln[0])):
-                    outstring += ', {:s}'.format(str(self.v[dof]))
-            outfile.write(outstring + '\n')
-            outfile.flush()
-
         # Perform the integration at fixed time steps
         if dt:
             ddt = dt
         else:
             ddt = t[1] - t[0]
+
         for ii in range(1, t_len + 1):
-            args = [q_list_soln[ii - 1], pi_list_soln[ii - 1], t[ii - 1], ddt]
+            args = [
+                q_list_soln[ii - 1],
+                pi_list_soln[ii - 1],
+                t[ii - 1],
+                ddt
+            ]
+
+            # Compute q_{ii} using (q_{ii-1}, pi_{ii-1}, t_{ii-1}, dt)
             qi_sol = self._qi_soln_map(*args)
             q_list_soln[ii] = self._q_np1_map(qi_sol, *args)
+
             # mod the value of any periodic variables that have mod value specified
             # This prevents NC evolution error due to increasing roundoff error as
             # any cyclic periodic variables become large.
             for jj, mod in enumerate(self.modlist):
                 if mod:
                     q_list_soln[ii, jj] = q_list_soln[ii, jj] % mod
+
             pi_list_soln[ii] = self._pi_np1_map(qi_sol, *args)
             if output_v:
                 qdot_list_soln[ii - 1] = self._qdot_n_map(qi_sol, *args)
 
-            if output_File:
-                if (ii - 1) % print_steps == 0:
-                    outstring = '{:d}'.format(ii - 1)
-                    if isinstance(t_out[0], float):
-                        outstring += ', {:.15e}'.format(t_out[ii - 1])
-                    else:
-                        outstring += ', {:.15e}'.format(t[ii - 1])
-                    for q_val in q_list_soln[ii - 1]:
-                        outstring += ', {:.15e}'.format(q_val)
-                    for pi_val in pi_list_soln[ii - 1]:
-                        outstring += ', {:.15e}'.format(pi_val)
-                    if output_v:
-                        for qdot_val in qdot_list_soln[ii - 1]:
-                            outstring += ', {:.15e}'.format(qdot_val)
-                    outfile.write(outstring + '\n')
-                    outfile.flush()
         # Return the numerical solutions
         if output_v:
             return q_list_soln[:-1].T, pi_list_soln[:-1].T, qdot_list_soln[:-1].T
+
         return q_list_soln[:-1].T, pi_list_soln[:-1].T
 
     def __call__(self, qi_list, vi_list, t):

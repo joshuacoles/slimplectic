@@ -403,6 +403,7 @@ def form_equations_of_motion(q_Table: list[list], q_p_Table: list[list], q_m_Tab
 
     # Create Symbolic Equation of Motion Tables
     # We don't have the EOM for pi_n+1 since it will not need to be solved implicitly later
+    # Each of these elements will be set equal to zero to solve
     EOM_List = []
     for i in range(len(Ld_EOM_Table)):
         for j in range(1, len(Ld_EOM_Table[0]) - 1):
@@ -749,8 +750,8 @@ def Gen_GGL_NC_VI_Map(
 
     # Generate the list of functions for evaluating the EOM
     eom_functions = [
-        lambdify(full_variable_list, equations_of_motion, modules=eval_modules)
-        for equations_of_motion in equations_of_motion
+        lambdify(full_variable_list, equation_of_motion, modules=eval_modules)
+        for equation_of_motion in equations_of_motion
     ]
 
     # Generate the Jacobian function table
@@ -766,6 +767,7 @@ def Gen_GGL_NC_VI_Map(
     q_p_longlist = flatten_table(q_plus_table)
     q_m_longlist = flatten_table(q_minus_table)
 
+    # 13(a,b)
     pi_n_expr = [
         diff(discrete_lagrangian, q_table[dof][-1])
         + Physical_Limit(
@@ -781,18 +783,20 @@ def Gen_GGL_NC_VI_Map(
         """
         EOM_Val_Vec is the function to be passed to
         scipy.optimize.root() that returns the Equation
-        of Motion evaulations that should be zero for
+        of Motion evaluations that should be zero for
         the correct values extra arguments qn_vec, pi_nvec,
         t, and ddt should be passed as well
         """
 
         # First convert the argument list for
         # the lambdified functions
-        EOM_arg_list = prep_eom_arguments(qi_vec,
-                                          qn_vec,
-                                          pi_nvec,
-                                          tval,
-                                          ddt, r=r)
+        EOM_arg_list = prep_eom_arguments(
+            qi_vec,
+            qn_vec,
+            pi_nvec,
+            tval,
+            ddt, r=r
+        )
         # print EOM_arg_list
         # Next we evaulate the EOM functions
         # in equations_of_motion
@@ -825,6 +829,7 @@ def Gen_GGL_NC_VI_Map(
     # These are the output functions:
     #############################
 
+    # JAX: Won't be doing this, we won't have explicit solutions
     if method == 'explicit':
         # print 'EXPLICIT METHOD'
         qi_func_args = []
@@ -883,10 +888,15 @@ def Gen_GGL_NC_VI_Map(
 
             return numpy.array(qi_sol)
 
-    def qi_sol_func_implicit(q_n_vec: NDArray[Any, Float], pi_n_vec: NDArray[Any, Float], tval: float, ddt: float,
-                             root_args: dict = {'tol': 1e-10}):
+    def qi_sol_func_implicit(
+            q_n_vec: NDArray[Any, Float],
+            pi_n_vec: NDArray[Any, Float],
+            tval: float,
+            ddt: float,
+            root_args: dict = {'tol': 1e-10}
+    ):
         """
-        Implements the implicit GGL-NC-VI method. This uses q_n_vec as am initial guess for each of the intermediate
+        Implements the implicit GGL-NC-VI method. This uses q_n_vec as an initial guess for each of the intermediate
         points [{q_1^(i)_0}, q_1^[n+1]_0, ...] to generate the iterated intermediate results for the implicit GGL-NC-VI
         method.
 
@@ -928,15 +938,23 @@ def Gen_GGL_NC_VI_Map(
         q_np1_vec[dof] - ndarray of next q values
 
         Inputs:
-        qi_sol[dof*(r+1)] - ndarray of qi_values from
-                            qi_sol_func
+        qi_sol[dof*(r+1)] - ndarray of qi_values from qi_sol_func
         q_n_vec[dof] - ndarray of current q_n values
         pi_n_vec[dof] - ndarray of current pi_n values
         tval - float for the current value of time
         ddt - float for the size of the time step
 
         """
-        q_np1_vec = [qi_sol[dof * (r + 1) + r] for dof in range(len(q_n_vec))]
+        q_np1_vec = [
+            # This indexes into a 1D array representing almost a 2D array
+            # row length: r + 1
+            # each row: per degree of freedom
+            # takes the final value of each row
+            qi_sol[(dof * (r + 1)) + r]
+            # for each q (by index)
+            for dof in range(len(q_n_vec))
+        ]
+
         return numpy.array(q_np1_vec)
 
     def pi_np1_func(qi_sol, q_n_vec, pi_n_vec, tval, ddt):
@@ -996,8 +1014,7 @@ def Gen_GGL_NC_VI_Map(
                 qi_vec.append(qi_sol[dof * (r + 1) + i])
             qi_table.append(qi_vec)
 
-        qdot_vec = [numpy.dot(numpy.array(derivative_matrix), qi_vec)[0] * 2 / ddt
-                    for qi_vec in qi_table]
+        qdot_vec = [numpy.dot(numpy.array(derivative_matrix), qi_vec)[0] * 2 / ddt for qi_vec in qi_table]
         return numpy.array(qdot_vec, dtype=float)
 
     # Verbose output:
