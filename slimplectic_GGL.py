@@ -904,7 +904,7 @@ def Gen_GGL_NC_VI_Map(
         """
 
         # Populate qi_0 array for nsolve()
-        qi_0 = numpy.array(q_n_vec[1:r + 2] * len(q_n_vec))
+        qi_0 = numpy.repeat(q_n_vec, r + 1)
 
         combined_root_args = {
             'fun': EOM_Val_Vec,
