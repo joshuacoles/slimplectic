@@ -11,6 +11,10 @@ def flatten_table(table: list[list]) -> list:
     return [v for vec in table for v in vec]
 
 
+def flatten_table_implicit(table: list[list]) -> list:
+    return [v for vec in table for v in vec[1:-1]]
+
+
 def generate_collocation_points(r: int, precision: int = 20) -> tuple[list[float], list[float], list[list[float]]]:
     """
     Gives the Collocation points, weights and derivative matrix for the Galerkin-Gauss-Lobatto Variational Integrator as
@@ -145,7 +149,7 @@ def Physical_Limit(q_list: list, q_p_list: list, q_m_list: list, expression):
     return expression.subs(sub_list)
 
 
-def GGL_q_Collocation_Table(qlist: list, collocation_point_count: int):
+def generate_collocation_table(qlist: list, collocation_point_count: int) -> list[list]:
     """
     Generates the symbol table to evaluate the degrees of freedom (in qlist) across the collocation points (number given
     by `collocation_point_count`). This generates a table with 1 row per q in qlist, and columns given by:
@@ -218,6 +222,8 @@ def discretise_lagrangian_and_coordinates(
     Returns:
         (Ld, q_Table), where Ld is the algebraic expression for the discrete Lagrangian, and q_Table is a 2D array of
         shape (len(q_list), r + 2) containing the sympy symbols for qs at each quadrature point.
+
+        Ld is a discretised conservative lagrangian. This is a weighted sum over each point within the quadrature.
     """
 
     # First compute collocation points, weights and derivative matrix for the quadrature.
@@ -227,7 +233,7 @@ def discretise_lagrangian_and_coordinates(
 
     # Create q_Table for all the algebraic variables based on q_list. Will be of shape (len(q_list), r+2) having rows:
     # [[..],..,[qx_i0,...,qx_i(r+2)],..,[..]]
-    q_Table = GGL_q_Collocation_Table(q_list, r + 2)
+    q_Table = generate_collocation_table(q_list, r + 2)
 
     # Create list of times for evaluating L
     t_list = [tsymbol + 0.5 * (1 + collocation_point) * ddt for collocation_point in collocation_points]
@@ -302,8 +308,8 @@ def discretise_non_conservative_lagrangian_and_coordinates(
     # Create q_{p/m}_Table for all the algebraic variables based on q_list
     # q_{p/m}_Table[len(qlist)][r+2]
     # [[..],..,[qx_i0,...,qx_i(r+2)],..,[..]]
-    q_p_Table = GGL_q_Collocation_Table(q_p_list, r + 2)
-    q_m_Table = GGL_q_Collocation_Table(q_m_list, r + 2)
+    q_p_Table = generate_collocation_table(q_p_list, r + 2)
+    q_m_Table = generate_collocation_table(q_m_list, r + 2)
 
     # Create dphidt_{p/m}_Table for the algebraic form of dPhi/dt where
     # Phi is the polynomial interpolation of q over the quadrature points
@@ -342,8 +348,8 @@ def discretise_non_conservative_lagrangian_and_coordinates(
     return Kd, q_p_Table, q_m_Table
 
 
-def Gen_iter_EOM_List(q_Table: list[list], q_p_Table: list[list], q_m_Table: list[list], pi_n_list: list,
-                      pi_np1_list: list, Ld: sympy.Expr, Kd: sympy.Expr, ddt: sympy.Symbol):
+def form_equations_of_motion(q_Table: list[list], q_p_Table: list[list], q_m_Table: list[list], pi_n_list: list,
+                             pi_np1_list: list, Ld: sympy.Expr, Kd: sympy.Expr, ddt: sympy.Symbol):
     """
     Generate the symbolic Equation of Motion Tables to be used for iteration.
 
@@ -683,6 +689,9 @@ def Gen_GGL_NC_VI_Map(
     # expressions
     ddt_symbol = Symbol('h_{GGL}')
 
+    # We need derivative_matrix for the dotq function
+    collocation_points, point_weights, derivative_matrix = generate_collocation_points(r)
+
     # Determine the discrete_lagrangian and discrete_non_conservative_lagrangian symbolic expressions for this system
     # As well as the q symbols for each dof and collocation point
 
@@ -715,7 +724,7 @@ def Gen_GGL_NC_VI_Map(
     # Generate the Equation of Motion Table for
     # q^[n] and q^(i)'s, but not q^[n+1]
     # (since pi_n+1 will be evaluated directly later)
-    EOM_List = Gen_iter_EOM_List(
+    equations_of_motion = form_equations_of_motion(
         q_table, q_plus_table, q_minus_table,
         pi_n_list, pi_np1_list,
         discrete_lagrangian,
@@ -741,13 +750,13 @@ def Gen_GGL_NC_VI_Map(
     # Generate the list of functions for evaluating the EOM
     eom_functions = [
         lambdify(full_variable_list, equations_of_motion, modules=eval_modules)
-        for equations_of_motion in EOM_List
+        for equations_of_motion in equations_of_motion
     ]
 
     # Generate the Jacobian function table
     J_Func_Table = [
         [lambdify(full_variable_list, J_Expr, modules=eval_modules) for J_Expr in J_Expr_Vec]
-        for J_Expr_Vec in compute_jacobian(EOM_List, J_qi_vec)
+        for J_Expr_Vec in compute_jacobian(equations_of_motion, J_qi_vec)
     ]
 
     # Here are some variables and functions to help
@@ -766,11 +775,7 @@ def Gen_GGL_NC_VI_Map(
         for dof in range(len(q_table))
     ]
 
-    pi_Func_Vec = [lambdify(full_variable_list, expr, modules=eval_modules)
-                   for expr in pi_n_expr]
-
-    # We need derivative_matrix for the dotq function
-    collocation_points, point_weights, derivative_matrix = generate_collocation_points(r)
+    pi_Func_Vec = [lambdify(full_variable_list, expr, modules=eval_modules) for expr in pi_n_expr]
 
     def EOM_Val_Vec(qi_vec, qn_vec, pi_nvec, tval, ddt, r=r):
         """
@@ -790,7 +795,7 @@ def Gen_GGL_NC_VI_Map(
                                           ddt, r=r)
         # print EOM_arg_list
         # Next we evaulate the EOM functions
-        # in EOM_List
+        # in equations_of_motion
         out = numpy.array([eom_f(*tuple(EOM_arg_list)) for eom_f in eom_functions])
 
         return out
@@ -830,7 +835,7 @@ def Gen_GGL_NC_VI_Map(
         qi_func_args.append(t_symbol)
         qi_func_args.append(ddt_symbol)
 
-        qi_sol_dict = solve(EOM_List, qi_symbol_list, dict=True)
+        qi_sol_dict = solve(equations_of_motion, qi_symbol_list, dict=True)
         #        print qi_symbol_list[0]
         #        print qi_sol_dict
         #        print qi_sol_dict[0]
@@ -872,39 +877,34 @@ def Gen_GGL_NC_VI_Map(
             qi_arg_vals.append(tval)
             qi_arg_vals.append(ddt)
 
-            qi_sol = [qi_func(*tuple(qi_arg_vals))
-                      for qi_func in qi_func_list]
+            qi_sol = [qi_func(*tuple(qi_arg_vals)) for qi_func in qi_func_list]
             # print qi_arg_vals
             # print qi_sol
 
             return numpy.array(qi_sol)
 
-    def qi_sol_func_implicit(q_n_vec, pi_n_vec, tval, ddt, root_args={'tol': 1e-10}):
-        """This function uses q_n_vec as a guess for each of the
-        intermediate points [{q_1^(i)_0}, q_1^[n+1]_0, ...]
-        to generate the iterated intermediate results
-        for the implicit GGL-NC-VI method.
-
-        Output:
-        qi_sol - nd.array qi_sol for the
-                 results of that give the roots of the appropriate
-                 discrete equations of motion.
-        Input:
-        q_n_vec[dof] - ndarray of current q_n values
-        pi_n_vec[dof] - ndarray of current pi_n values
-        tval - float for the current value of time
-        ddt - float for the size of the time step
-        root_args - dictionary of arguments to be included in the
-                    scipy.optimize.root() method e.g.
-                    {'method':'hybr', 'tol': 1e-8}
-
+    def qi_sol_func_implicit(q_n_vec: NDArray[Any, Float], pi_n_vec: NDArray[Any, Float], tval: float, ddt: float,
+                             root_args: dict = {'tol': 1e-10}):
         """
+        Implements the implicit GGL-NC-VI method. This uses q_n_vec as am initial guess for each of the intermediate
+        points [{q_1^(i)_0}, q_1^[n+1]_0, ...] to generate the iterated intermediate results for the implicit GGL-NC-VI
+        method.
+
+        All vectors are assumed to be of shape `(dof,)` unless stated otherwise.
+
+        Args:
+            q_n_vec: An ndarray of current q_n values
+            pi_n_vec: ndarray of current pi_n values
+            tval: float for the current value of time
+            ddt: float for the size of the time step
+            root_args: keyword arguments to pass to `scipy.optimize.root`. For example, {'method':'hybr', 'tol': 1e-8}.
+
+        Returns:
+            An ndarray of intermediate values for each dof which given the roots of the appropriate discrete equations.
+        """
+
         # Populate qi_0 array for nsolve()
-        qi_0 = []
-        for i in range(len(q_n_vec)):
-            for j in range(1, r + 2):
-                qi_0.append(q_n_vec[i])
-        qi_0 = numpy.array(qi_0)
+        qi_0 = numpy.array(q_n_vec[1:r + 2] * len(q_n_vec))
 
         combined_root_args = {
             'fun': EOM_Val_Vec,
@@ -940,7 +940,8 @@ def Gen_GGL_NC_VI_Map(
         return numpy.array(q_np1_vec)
 
     def pi_np1_func(qi_sol, q_n_vec, pi_n_vec, tval, ddt):
-        """This function uses the qi_sol from the first
+        """
+        This function uses the qi_sol from the first
         Gen_GGL_NC_VI_Map returned function to calculate
         the pi's for the next step. This involves evaluating the last
         equation of motion dL_d/d(q^[n+1]) + ...
@@ -969,7 +970,8 @@ def Gen_GGL_NC_VI_Map(
         return numpy.array(pi_np1_vec)
 
     def qdot_n_func(qi_sol, q_n_vec, pi_n_vec, tval, ddt):
-        """This function uses the qi_sol from the first
+        """
+        This function uses the qi_sol from the first
         Gen_GGL_NC_VI_Map returned function to calculate
         the qdot velocities for current step. This involves
         evaluating qdot using the derivative matrix defined by
@@ -1032,7 +1034,7 @@ def Gen_GGL_NC_VI_Map(
         if verbose_rational:
             for dof in range(len(q_table)):
                 for i in range(r + 1):
-                    print('\t0 = ' + latex(nsimplify(expand(EOM_List[dof * (r + 1) + i]),
+                    print('\t0 = ' + latex(nsimplify(expand(equations_of_motion[dof * (r + 1) + i]),
                                                      tolerance=1e-15,
                                                      rational=verbose_rational)))
                 print('\t0 = ' + latex(nsimplify(-pi_np1_list[dof] + expand(pi_n_expr[dof]),
@@ -1042,7 +1044,7 @@ def Gen_GGL_NC_VI_Map(
         else:
             for dof in range(len(q_table)):
                 for i in range(r + 1):
-                    print('\t0 = ' + latex(simplify(expand(EOM_List[dof * (r + 1) + i]))))
+                    print('\t0 = ' + latex(simplify(expand(equations_of_motion[dof * (r + 1) + i]))))
                 print('\t0 = ' + latex(-pi_np1_list[dof] + simplify(expand(pi_n_expr[dof]))))
         print('===================================')
 
